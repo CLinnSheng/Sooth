@@ -1,0 +1,17 @@
+# Foundry build output
+contracts/out/
+contracts/cache/
+
+# Foundry deploy logs: keep testnet deployments (they record contract addresses), ignore local anvil runs and dry runs
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+
+# Secrets: private keys, RPC URLs. Commit a .env.example with placeholder values instead.
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+/.vscode/
