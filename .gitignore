@@ -15,3 +15,4 @@ contracts/broadcast/**/dry-run/
 .DS_Store
 .idea/
 /.vscode/
+.pi/
