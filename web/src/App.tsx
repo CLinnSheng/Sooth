@@ -1,23 +1,13 @@
-import { useState } from 'react'
 import { Route, Routes } from 'react-router'
 import { Nav } from './components'
-import { WalletContext } from './wallet'
-import { WALLET } from './mock'
+import { WalletProvider } from './wallet'
 import Home from './pages/Home'
 import Market from './pages/Market'
 import Portfolio from './pages/Portfolio'
 
 export default function App() {
-  const [wallet, setWallet] = useState<{ address: string; usdc: number } | null>(null)
-  const ctx = {
-    wallet,
-    connect: () => setWallet(WALLET),
-    disconnect: () => setWallet(null),
-    mint: () => setWallet((w) => w && { ...w, usdc: w.usdc + 100 }),
-  }
-
   return (
-    <WalletContext.Provider value={ctx}>
+    <WalletProvider>
       <Nav />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <Routes>
@@ -31,6 +21,6 @@ export default function App() {
         <span>Illustrative markets · Testnet USDC · Not investment advice</span>
         <span>Base Sepolia</span>
       </footer>
-    </WalletContext.Provider>
+    </WalletProvider>
   )
 }
