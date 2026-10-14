@@ -7,6 +7,7 @@ import {
   MARKET_ADDRESS,
   basescanAddr,
   basescanTx,
+  cents,
   change30d,
   compact,
   date,
@@ -104,7 +105,7 @@ export default function Market() {
               return (
                 <div key={pos.outcome} className="grid grid-cols-2 gap-y-1 text-sm sm:grid-cols-4">
                   <div><p className="text-xs text-zinc-500">Shares</p>{pos.shares} {pos.outcome}</div>
-                  <div><p className="text-xs text-zinc-500">Avg / now</p>{usdc(pos.avgPrice)} / {usdc(priceOf(market, pos.outcome))}</div>
+                  <div><p className="text-xs text-zinc-500">Avg / now</p>{cents(pos.avgPrice)} / {cents(priceOf(market, pos.outcome))}</div>
                   <div><p className="text-xs text-zinc-500">Value</p>{usdc(value)} USDC</div>
                   <div>
                     <p className="text-xs text-zinc-500">PnL</p>

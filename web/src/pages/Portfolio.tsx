@@ -1,11 +1,14 @@
-import { ArrowUpRight, Wallet } from 'lucide-react'
+import { ArrowUpRight, LoaderCircle, Wallet } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useWallet } from '../wallet'
-import { basescanTx, date, marketById, positionValue, positions, priceOf, signed, trades, usdc } from '../mock'
+import { useAccount } from 'wagmi'
+import { basescanTx, cents, date, marketById, positionValue, positions, priceOf, signed, trades, usdc } from '../mock'
 
 export default function Portfolio() {
-  const { wallet, connect, mint } = useWallet()
+  const { wallet, connect } = useWallet()
+  const { isConnecting, isReconnecting } = useAccount()
+  const connecting = isConnecting || isReconnecting
   const [tab, setTab] = useState<'Positions' | 'History'>('Positions')
 
   if (!wallet)
@@ -13,8 +16,13 @@ export default function Portfolio() {
       <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-zinc-300 py-20 text-zinc-500">
         <Wallet size={22} />
         <p className="text-sm">Connect your wallet to see your positions and history.</p>
-        <button onClick={connect} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 active:scale-[0.98]">
-          Connect wallet
+        <button
+          onClick={connect}
+          disabled={connecting}
+          className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500"
+        >
+          {connecting && <LoaderCircle size={15} className="animate-spin" />}
+          {connecting ? 'Connecting…' : 'Connect wallet'}
         </button>
       </div>
     )
@@ -49,8 +57,7 @@ export default function Portfolio() {
         )}
         {stat(
           'Cash',
-          `${usdc(wallet.usdc)} USDC`,
-          <button onClick={mint} className="w-fit text-xs font-medium underline underline-offset-4">Get 100 test USDC</button>,
+          wallet.usdc == null ? <span className="text-zinc-400">— USDC</span> : `${usdc(wallet.usdc)} USDC`,
         )}
       </div>
 
@@ -87,9 +94,9 @@ export default function Portfolio() {
                   <td className="max-w-xs p-4"><Link to={`/market/${m.id}`} className="hover:underline">{m.question}</Link></td>
                   <td className={`p-4 ${p.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{p.outcome}</td>
                   <td className="p-4 text-right">{p.shares}</td>
-                  <td className="p-4 text-right">{usdc(p.avgPrice)}</td>
+                  <td className="p-4 text-right">{cents(p.avgPrice)}</td>
                   <td className="p-4 text-right">
-                    {m.status === 'resolved' ? <span className="text-xs text-zinc-500">Resolved {m.resolvedOutcome}</span> : usdc(priceOf(m, p.outcome))}
+                    {m.status === 'resolved' ? <span className="text-xs text-zinc-500">Resolved {m.resolvedOutcome}</span> : cents(priceOf(m, p.outcome))}
                   </td>
                   <td className="p-4 text-right">{usdc(value)}</td>
                   <td className="p-4 text-right">

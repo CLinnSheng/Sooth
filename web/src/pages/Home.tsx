@@ -25,7 +25,7 @@ export default function Home() {
     .filter((m) => m.id !== featured.id)
     .filter((m) => category === 'All' || m.category === category)
     .filter((m) => m.question.toLowerCase().includes(query.trim().toLowerCase()))
-    .sort(sorts[sort])
+    .sort((a, b) => Number(a.status === 'resolved') - Number(b.status === 'resolved') || sorts[sort](a, b))
   const p = priceYes(featured)
 
   return (
@@ -42,8 +42,8 @@ export default function Home() {
             </Link>
           </h1>
           <div className="mt-auto flex gap-2">
-            <OutcomeButton outcome="YES" price={p} onClick={() => pick(featured.id)('YES')} />
-            <OutcomeButton outcome="NO" price={1 - p} onClick={() => pick(featured.id)('NO')} />
+            <OutcomeButton verb="Buy" outcome="YES" price={p} onClick={() => pick(featured.id)('YES')} />
+            <OutcomeButton verb="Buy" outcome="NO" price={1 - p} onClick={() => pick(featured.id)('NO')} />
           </div>
           <span className="text-xs text-zinc-500">{compact(featured.volume)} USDC vol</span>
         </div>

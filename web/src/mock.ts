@@ -198,6 +198,8 @@ export const usdc = (n: number) =>
 export const compact = (n: number) =>
   n.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 }).toLowerCase()
 export const pct = (p: number) => `${Math.round(p * 100)}%`
+// Share price in cents: 1 USDC = 100¢, so a 0.64 USDC share reads as 64¢.
+export const cents = (p: number, digits = 0) => `${(p * 100).toFixed(digits)}¢`
 export const signed = (n: number) => `${n >= 0 ? '+' : '−'}${usdc(Math.abs(n))}`
 export const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
 export const date = (iso: string) =>
