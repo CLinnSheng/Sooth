@@ -14,26 +14,22 @@ import {OutcomeToken} from "./OutcomeToken.sol";
 
 /// @title MarketFactory
 /// @notice Validates parameters, deploys a Market clone, seeds it with collateral and
-///         emits MarketCreated. Only MARKET_CREATOR_ROLE holders can create markets.
+///         emits MarketCreated. Only admins (DEFAULT_ADMIN_ROLE) can create markets.
 contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
     using SafeERC20 for IERC20;
 
-    bytes32 public constant MARKET_CREATOR_ROLE = keccak256("MARKET_CREATOR_ROLE");
-
-    /// @dev Only supported starting probability until custom odds are implemented (Q3).
     uint16 internal constant FIFTY_FIFTY_BPS = 5_000;
     uint16 internal constant BPS = 10_000;
 
     address public immutable implementation;
+
     IOutcomeToken public immutable outcomeToken;
     IERC20 public immutable collateral;
 
     uint64 public immutable minDuration;
-    /// @dev In the collateral token's smallest unit (e.g. 10e6 = 10 USDC with 6 decimals).
     uint256 public immutable minLiquidity;
     uint16 public immutable maxFeeBps;
 
-    /// @dev Market IDs start at 1, so 0 always means "no market".
     uint256 public marketCount;
     mapping(uint256 marketId => address market) public markets;
     mapping(address market => bool) public isMarket;
@@ -56,13 +52,12 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
         implementation = address(new Market(address(this), token));
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(MARKET_CREATOR_ROLE, admin);
     }
 
     function createMarket(CreateParams calldata p)
         external
         nonReentrant
-        onlyRole(MARKET_CREATOR_ROLE)
+        onlyRole(DEFAULT_ADMIN_ROLE)
         returns (uint256 marketId, address market)
     {
         _validate(p);

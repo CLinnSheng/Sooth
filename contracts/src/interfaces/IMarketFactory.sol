@@ -6,7 +6,7 @@ import {IOutcomeToken} from "./IOutcomeToken.sol";
 
 /// @title IMarketFactory
 /// @notice Creates binary prediction markets as EIP-1167 clones. Creation is admin-only
-///         for now (MARKET_CREATOR_ROLE), so there is no creator bond yet. Every market
+///         for now (DEFAULT_ADMIN_ROLE), so there is no creator bond yet. Every market
 ///         uses the single collateral token fixed at deployment (USDC).
 interface IMarketFactory {
     struct CreateParams {
@@ -52,7 +52,6 @@ interface IMarketFactory {
     ///         The caller must first approve this factory for `initialLiquidity`.
     function createMarket(CreateParams calldata p) external returns (uint256 marketId, address market);
 
-    function MARKET_CREATOR_ROLE() external view returns (bytes32);
     function implementation() external view returns (address);
     function outcomeToken() external view returns (IOutcomeToken);
     function collateral() external view returns (IERC20);

@@ -395,10 +395,9 @@ function priceYes() external view returns (uint256) {
 ```solidity
 contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
     using SafeERC20 for IERC20;
-    bytes32 public constant MARKET_CREATOR_ROLE = keccak256("MARKET_CREATOR_ROLE");
 ```
 
-- **AccessControl** (OpenZeppelin) is a role system. A role is just a name hashed into a `bytes32`. Admins can `grantRole` and `revokeRole`. This is the Q6 "admin-only" decision, built so several teammates can hold the role.
+- **AccessControl** (OpenZeppelin) is a role system. A role is just a name hashed into a `bytes32`. Admins can `grantRole` and `revokeRole`. Only `DEFAULT_ADMIN_ROLE` is used: it can create markets and manage admins. This is the Q6 "admin-only" decision, built so several teammates can hold the role.
 - **ReentrancyGuard** provides the `nonReentrant` modifier, which blocks a function from being called again while it's still running. This defends against **reentrancy attacks**, where a malicious contract we call into calls back into us mid-function (the famous 2016 DAO hack). We call several external contracts during creation, so it's a cheap safety net. It also works safely in clones: it only blocks when its status is "entered", and a fresh clone's status starts at 0.
 - **SafeERC20** exists because some real tokens don't follow the ERC-20 standard properly (for example, they return nothing instead of `true`). `safeTransferFrom` handles those cases and reverts if the transfer failed.
 
@@ -429,21 +428,20 @@ constructor(address admin, uint64 minDuration_, uint256 minLiquidity_, uint16 ma
     outcomeToken = token;
     implementation = address(new Market(address(this), token));
     _grantRole(DEFAULT_ADMIN_ROLE, admin);
-    _grantRole(MARKET_CREATOR_ROLE, admin);
 }
 ```
 
 - `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token)` deploys the implementation and tells it both addresses. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
 - Zero minimums are rejected, because a market that closes instantly or has an empty pool makes no sense. This also lets `_validate` use simpler checks.
 - The collateral token is fixed forever. Only USDC is supported, so there is no whitelist to manage; supporting another token means deploying a new factory.
-- `DEFAULT_ADMIN_ROLE` can grant and revoke roles. `MARKET_CREATOR_ROLE` can create markets.
+- `DEFAULT_ADMIN_ROLE` can create markets and grant or revoke the role for other admins.
 - The limits are constructor parameters (Q7), so the deploy script can use 10 minutes for a demo and longer values elsewhere.
 
 #### `createMarket`
 
 ```solidity
 function createMarket(CreateParams calldata p)
-    external nonReentrant onlyRole(MARKET_CREATOR_ROLE)
+    external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE)
     returns (uint256 marketId, address market)
 {
     _validate(p);
@@ -531,14 +529,14 @@ function setUp() public {
 | `vm.expectEmit(...)` | The next call must emit this exact event |
 | `bound(x, min, max)` | Squeezes a random fuzz value into a range |
 
-> **Pitfall:** `prank` and `expectRevert` apply to the **next call**, and reading a value from a contract (e.g. `factory.MARKET_CREATOR_ROLE()`) *is* a call. Always read values into local variables first, then call `vm.prank` / `vm.expectRevert`, then make the call you're testing. This bug happened twice while writing these tests.
+> **Pitfall:** `prank` and `expectRevert` apply to the **next call**, and reading a value from a contract (e.g. `factory.DEFAULT_ADMIN_ROLE()`) *is* a call. Always read values into local variables first, then call `vm.prank` / `vm.expectRevert`, then make the call you're testing. This bug happened twice while writing these tests.
 
 **Test groups:**
 
 | Group | Examples | What it proves |
 |---|---|---|
 | Normal flow | `StoresParameters`, `EmitsMarketCreated`, `IdsIncrementFromOne`, `MovesCollateralAndSeedsPools`, `StartsAtFiftyFifty` | Creation works and everything is saved correctly |
-| Access control | `CallerIsNotMarketCreator`, `GrantedCreatorCanCreate`, `CollateralNotApproved` | Only admins can create; the creator must approve USDC first |
+| Access control | `CallerIsNotAdmin`, `GrantedAdminCanCreate`, `CollateralNotApproved` | Only admins can create; the creator must approve USDC first |
 | Validation | One `RevertWhen_…` test per check, plus `AcceptsExactMinimums` | Every bad input is rejected; values exactly at the limit are accepted |
 | State machine | `ClosedIsDerivedFromCloseTime` | 1 second before close → Open, at close → Closed |
 | Clone and token safety | `MarketInitializedTwice`, `ImplementationInitialized`, `NonMarketMints`, `MarketMintsAnotherMarketsToken` | Nobody can hijack a market or mint tokens they shouldn't |
@@ -586,7 +584,7 @@ vm.stopBroadcast();
 | `MIN_LIQUIDITY` | 10000000 (10 mUSDC) | Smallest seed amount |
 | `MAX_FEE_BPS` | 500 (5%) | Highest allowed trading fee |
 | `COLLATERAL` | deploy new MockUSDC (test chains only) | Existing collateral token address. Required on other chains |
-| `ADMIN` | the deploying wallet | Who gets the admin and creator roles |
+| `ADMIN` | the deploying wallet | Who gets the admin role (can create markets) |
 
 To try it locally:
 

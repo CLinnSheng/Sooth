@@ -179,15 +179,15 @@ contract MarketFactoryTest is Test {
     // Access control
     // ---------------------------------------------------------------
 
-    function test_RevertWhen_CallerIsNotMarketCreator() public {
-        bytes32 role = factory.MARKET_CREATOR_ROLE();
+    function test_RevertWhen_CallerIsNotAdmin() public {
+        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         factory.createMarket(_params());
     }
 
-    function test_GrantedCreatorCanCreate() public {
-        bytes32 role = factory.MARKET_CREATOR_ROLE();
+    function test_GrantedAdminCanCreate() public {
+        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
         vm.prank(admin);
         factory.grantRole(role, alice);
 
@@ -201,7 +201,7 @@ contract MarketFactoryTest is Test {
     }
 
     function test_RevertWhen_CollateralNotApproved() public {
-        bytes32 role = factory.MARKET_CREATOR_ROLE();
+        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
         vm.prank(admin);
         factory.grantRole(role, alice);
         usdc.mint(alice, LIQUIDITY);
