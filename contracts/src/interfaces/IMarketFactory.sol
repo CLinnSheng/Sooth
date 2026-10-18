@@ -50,7 +50,7 @@ interface IMarketFactory {
     function implementation() external view returns (address);
     function outcomeToken() external view returns (IOutcomeToken);
     function collateral() external view returns (IERC20);
-    function minLiquidity() external view returns (uint256);
+    function MIN_LIQUIDITY() external view returns (uint256);
     function marketCount() external view returns (uint256);
     function markets(uint256 marketId) external view returns (address);
     function isMarket(address market) external view returns (bool);

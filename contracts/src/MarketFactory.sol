@@ -19,23 +19,22 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
     using SafeERC20 for IERC20;
 
     uint16 internal constant FIFTY_FIFTY_BPS = 5_000;
+    /// @dev Smallest seed, 10 USDC
+    uint256 public constant MIN_LIQUIDITY = 10e6;
 
     address public immutable implementation;
 
     IOutcomeToken public immutable outcomeToken;
     IERC20 public immutable collateral;
 
-    uint256 public immutable minLiquidity;
-
     uint256 public marketCount;
     mapping(uint256 marketId => address market) public markets;
     mapping(address market => bool) public isMarket;
 
-    constructor(address admin, uint256 minLiquidity_, address collateral_) {
-        if (admin == address(0) || collateral_ == address(0) || minLiquidity_ == 0) revert InvalidConfig();
+    constructor(address admin, address collateral_) {
+        if (admin == address(0) || collateral_ == address(0)) revert InvalidConfig();
 
         collateral = IERC20(collateral_);
-        minLiquidity = minLiquidity_;
 
         OutcomeToken token = new OutcomeToken(address(this));
         outcomeToken = token;
@@ -94,8 +93,7 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
         if (p.initialYesProbabilityBps != FIFTY_FIFTY_BPS) {
             revert UnsupportedInitialProbability(p.initialYesProbabilityBps);
         }
-        // minLiquidity is never 0 (checked in the constructor), so this also rejects zero liquidity.
-        if (p.initialLiquidity < minLiquidity) revert LiquidityTooLow(p.initialLiquidity, minLiquidity);
+        if (p.initialLiquidity < MIN_LIQUIDITY) revert LiquidityTooLow(p.initialLiquidity, MIN_LIQUIDITY);
         if (p.specHash == bytes32(0)) revert EmptySpecHash();
         if (bytes(p.specCID).length == 0) revert EmptySpecCID();
     }

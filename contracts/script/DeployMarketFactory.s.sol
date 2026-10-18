@@ -6,16 +6,13 @@ import {MarketFactory} from "../src/MarketFactory.sol";
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 
 /// @notice Deploys MarketFactory, plus MockUSDC when COLLATERAL is not set (test chains only).
-/// @dev Config comes from env vars so local, demo and testnet deploys can differ (Q7):
-///      MIN_LIQUIDITY (default 10e6 = 10 USDC), COLLATERAL (default: deploy MockUSDC),
-///      ADMIN (default: the broadcasting wallet).
+/// @dev Env vars: COLLATERAL (default: deploy MockUSDC), ADMIN (default: the broadcasting wallet).
 ///
 ///      Local: anvil, then
 ///        forge script script/DeployMarketFactory.s.sol --rpc-url http://127.0.0.1:8545 \
 ///          --broadcast --private-key <anvil key>
 contract DeployMarketFactory is Script {
     function run() external returns (MarketFactory factory, address collateral) {
-        uint256 minLiquidity = vm.envOr("MIN_LIQUIDITY", uint256(10e6));
         collateral = vm.envOr("COLLATERAL", address(0));
 
         // MockUSDC can be minted by anyone, so never make it the collateral on a real network.
@@ -27,7 +24,7 @@ contract DeployMarketFactory is Script {
         require(admin != DEFAULT_SENDER, "No deployer wallet: pass --private-key / --account, or set ADMIN");
 
         if (collateral == address(0)) collateral = address(new MockUSDC());
-        factory = new MarketFactory(admin, minLiquidity, collateral);
+        factory = new MarketFactory(admin, collateral);
         vm.stopBroadcast();
 
         console.log("Admin:        ", admin);
