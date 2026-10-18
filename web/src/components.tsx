@@ -138,8 +138,8 @@ const categoryIcons: Record<Category, typeof Coins> = {
 export function CategoryLabel({ category }: { category: Category }) {
   const Icon = categoryIcons[category]
   return (
-    <span className="flex items-center gap-1.5 text-xs text-zinc-500">
-      <Icon size={14} /> {category}
+    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">
+      <Icon size={13} /> {category}
     </span>
   )
 }
@@ -183,7 +183,17 @@ export function PriceChart({ points, height = 160, axis = false }: { points: num
   )
 }
 
-// Neutral outline button; outcome colour only shows on hover / when selected.
+// YES share of the YES/NO split, like a scoreboard: who is ahead, at a glance.
+export function ProbabilityBar({ p }: { p: number }) {
+  return (
+    <div className="flex h-1.5 gap-0.5" aria-hidden>
+      <div className="rounded-full bg-yes" style={{ width: `${p * 100}%` }} />
+      <div className="flex-1 rounded-full bg-no" />
+    </div>
+  )
+}
+
+// Tinted by outcome so the action reads as a bet, solid when selected.
 export function OutcomeButton({
   outcome,
   price,
@@ -194,19 +204,20 @@ export function OutcomeButton({
   const tone =
     outcome === 'YES'
       ? selected
-        ? 'border-yes bg-yes-soft text-yes'
-        : 'hover:border-yes hover:bg-yes-soft hover:text-yes'
+        ? 'bg-yes text-black'
+        : 'bg-yes-soft text-yes hover:bg-yes/25'
       : selected
-        ? 'border-no bg-no-soft text-no'
-        : 'hover:border-no hover:bg-no-soft hover:text-no'
+        ? 'bg-no text-black'
+        : 'bg-no-soft text-no hover:bg-no/25'
   return (
     <button
       type="button"
       aria-pressed={selected}
       {...rest}
-      className={`flex flex-1 items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium ${press} ${focus} ${tone}`}
+      className={`flex flex-1 items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-semibold ${press} ${focus} ${tone}`}
     >
-      <span>{verb && `${verb} `}{outcome === 'YES' ? 'Yes' : 'No'}</span>
+      {/* The colour already says "buy"; the verb stays for screen readers. */}
+      <span>{verb && <span className="sr-only">{verb} </span>}{outcome === 'YES' ? 'Yes' : 'No'}</span>
       <span>{cents(price)}</span>
     </button>
   )
@@ -215,46 +226,47 @@ export function OutcomeButton({
 export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Outcome) => void }) {
   const p = priceYes(market)
   return (
-    <article className="relative flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 transition hover:border-zinc-300 hover:shadow-sm">
-      <CategoryLabel category={market.category} />
-      <h3 className="font-medium leading-snug">
-        <Link to={`/market/${market.id}`} className={`rounded after:absolute after:inset-0 after:rounded-2xl ${focus}`}>
+    <article className="relative flex flex-col gap-4 rounded-3xl bg-surface p-5 transition-colors hover:bg-[#232325]">
+      <div className="flex items-center justify-between">
+        <CategoryLabel category={market.category} />
+        <span className="text-xs text-muted">
+          {market.status === 'resolved' ? 'Closed' : 'Closes'} {date(market.closesAt)}
+        </span>
+      </div>
+      <h3 className="font-semibold leading-snug">
+        <Link to={`/market/${market.id}`} className={`rounded after:absolute after:inset-0 after:rounded-3xl ${focus}`}>
           {market.question}
         </Link>
       </h3>
-      <div className="mt-auto flex items-baseline gap-2">
-        {market.status === 'resolved' ? (
-          <div className="flex flex-col gap-1">
-            <span className="flex items-center gap-1.5 text-2xl font-semibold tracking-tight">
-              <Check size={22} className={market.resolvedOutcome === 'YES' ? 'text-yes' : 'text-no'} />
-              Resolved {market.resolvedOutcome === 'YES' ? 'Yes' : 'No'}
-            </span>
-            <span className="text-xs text-zinc-500">
-              Winning {market.resolvedOutcome === 'YES' ? 'Yes' : 'No'} shares paid 1 USDC each
-            </span>
-          </div>
-        ) : (
-          <>
-            <span className="text-2xl font-semibold tracking-tight">{pct(p)}</span>
-            <span className="text-sm text-zinc-500">Yes</span>
+      {market.status === 'resolved' ? (
+        <div className="mt-auto flex flex-col gap-1">
+          <span className="flex items-center gap-2 text-3xl font-extrabold tracking-tight">
+            <Check size={26} strokeWidth={3} className={market.resolvedOutcome === 'YES' ? 'text-yes' : 'text-no'} />
+            {market.resolvedOutcome === 'YES' ? 'Yes' : 'No'}
+          </span>
+          <span className="text-xs text-muted">
+            Resolved · winning shares paid 1 USDC each
+          </span>
+        </div>
+      ) : (
+        <div className="mt-auto flex flex-col gap-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[40px] font-extrabold leading-none tracking-tighter">{pct(p)}</span>
+            <span className="text-sm text-muted">chance</span>
             <span className="ml-auto">
               <Change value={change30d(market)} />
             </span>
-          </>
-        )}
-      </div>
+          </div>
+          <ProbabilityBar p={p} />
+        </div>
+      )}
       {market.status === 'open' && (
         <div className="relative z-10 flex gap-2">
           <OutcomeButton verb="Buy" outcome="YES" price={p} onClick={() => onPick('YES')} />
           <OutcomeButton verb="Buy" outcome="NO" price={1 - p} onClick={() => onPick('NO')} />
         </div>
       )}
-      <div className="flex justify-between text-xs text-zinc-500">
-        <span>
-          {market.status === 'resolved' ? 'Closed' : 'Closes'} {date(market.closesAt)}
-        </span>
-        <span>{compact(market.volume)} USDC vol</span>
-      </div>
+      <span className="text-xs text-muted">{compact(market.volume)} USDC vol</span>
     </article>
   )
 }

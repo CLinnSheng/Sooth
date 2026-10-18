@@ -2,10 +2,10 @@
 
 /* Green and red are reserved for outcomes; brand actions stay neutral. */
 @theme {
-  --color-yes: #15803d;
-  --color-yes-soft: #f0fdf4;
-  --color-no: #b91c1c;
-  --color-no-soft: #fef2f2;
+  --color-yes: #30d158;
+  --color-yes-soft: rgb(48 209 88 / 0.16);
+  --color-no: #ff453a;
+  --color-no-soft: rgb(255 69 58 / 0.16);
 
   /* Dark surfaces, layered by lightness instead of borders (Apple dark palette). */
   --color-canvas: #000000;
@@ -17,5 +17,7 @@
 
 body {
   @apply bg-canvas text-white antialiased;
+  /* Native controls (select menus, scrollbars) render dark too. */
+  color-scheme: dark;
   font-variant-numeric: tabular-nums;
 }
