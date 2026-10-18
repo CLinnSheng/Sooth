@@ -12,7 +12,7 @@ Design decisions referenced as **Q1–Q8** come from the team's market creation 
 | Q4 | The arbitrator **may** be the creator (risk documented in the threat model) |
 | Q5 | Spec **hash** stored on-chain, IPFS **CID** only in the event |
 | Q6 | **Admin-only** creation, so no creator bond yet |
-| Q7 | Limits (`minDuration`, `minLiquidity`, `maxFeeBps`) are constructor parameters |
+| Q7 | `minLiquidity` is a constructor parameter. The fee (flat 1%) and resolution window (7 days) are constants in `Market` |
 
 Run everything from `contracts/`: `forge build`, `forge test`.
 
@@ -177,21 +177,22 @@ Interfaces also hold the shared **types**, **events** and **errors**.
 
 #### `IMarketFactory.sol`
 
-**The input struct.** A `struct` groups fields together, so the frontend passes one object instead of 9 separate arguments:
+**The input struct.** A `struct` groups fields together, so the frontend passes one object instead of 6 separate arguments:
 
 ```solidity
 struct CreateParams {
-    address collateral;              // which token is used as money (USDC)
     address arbitrator;              // who will resolve the market
     uint64  closeTime;               // when trading stops (unix seconds, UTC)
-    uint64  resolutionDeadline;      // if no outcome by now → cancel/refund later
-    uint16  feeBps;                  // trading fee; 1 bps = 0.01%, so 200 = 2%
     uint16  initialYesProbabilityBps;// must be 5000 (= 50%) for now (Q3)
     bytes32 specHash;                // fingerprint of the rules file (Q5)
     string  specCID;                 // IPFS address of the rules file (Q5)
     uint256 initialLiquidity;        // how much USDC to seed the market with
 }
 ```
+
+There is no `collateral` field: every market uses the single token (USDC) fixed in the factory at deployment.
+
+There is no fee or deadline field either. Every trade pays a flat 1% (`Market.FEE_BPS = 100`), and the resolution deadline is always `closeTime + 7 days` (`Market.RESOLUTION_WINDOW`). The deadline is a maximum, not a wait: the arbitrator can resolve any time after close and winners redeem straight away. Only if nobody resolves by the deadline can the market be cancelled and refunded.
 
 `uint64` and `uint16` are smaller number types. They're big enough for timestamps and percentages, and the compiler can pack them together to save storage.
 
@@ -206,8 +207,8 @@ An **event** is a log message stored on the blockchain. Contracts can't read eve
 **Custom errors:**
 
 ```solidity
-error CloseTimeTooSoon(uint64 closeTime, uint256 earliestAllowed);
-error FeeTooHigh(uint16 feeBps, uint16 maxFeeBps);
+error CloseTimeInPast(uint64 closeTime, uint256 currentTime);
+error LiquidityTooLow(uint256 initialLiquidity, uint256 minLiquidity);
 ```
 
 When a check fails, the transaction **reverts** (it's cancelled and all changes are undone) with one of these errors. Custom errors cost less gas than text messages and carry useful values, so the frontend can show something like "Close time must be after 14:30".
@@ -394,10 +395,9 @@ function priceYes() external view returns (uint256) {
 ```solidity
 contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
     using SafeERC20 for IERC20;
-    bytes32 public constant MARKET_CREATOR_ROLE = keccak256("MARKET_CREATOR_ROLE");
 ```
 
-- **AccessControl** (OpenZeppelin) is a role system. A role is just a name hashed into a `bytes32`. Admins can `grantRole` and `revokeRole`. This is the Q6 "admin-only" decision, built so several teammates can hold the role.
+- **AccessControl** (OpenZeppelin) is a role system. A role is just a name hashed into a `bytes32`. Admins can `grantRole` and `revokeRole`. Only `DEFAULT_ADMIN_ROLE` is used: it can create markets and manage admins. This is the Q6 "admin-only" decision, built so several teammates can hold the role.
 - **ReentrancyGuard** provides the `nonReentrant` modifier, which blocks a function from being called again while it's still running. This defends against **reentrancy attacks**, where a malicious contract we call into calls back into us mid-function (the famous 2016 DAO hack). We call several external contracts during creation, so it's a cheap safety net. It also works safely in clones: it only blocks when its status is "entered", and a fresh clone's status starts at 0.
 - **SafeERC20** exists because some real tokens don't follow the ERC-20 standard properly (for example, they return nothing instead of `true`). `safeTransferFrom` handles those cases and reverts if the transfer failed.
 
@@ -406,41 +406,39 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 ```solidity
 address public immutable implementation;      // the Market "master copy"
 IOutcomeToken public immutable outcomeToken;
-uint64  public immutable minDuration;         // Q7 limits, fixed at deploy
-uint256 public immutable minLiquidity;
-uint16  public immutable maxFeeBps;
+IERC20  public immutable collateral;          // the one token used as money (USDC)
+uint256 public immutable minLiquidity;        // Q7 limit, fixed at deploy
 
 uint256 public marketCount;                   // also the last market ID
 mapping(uint256 => address) public markets;   // id → market address
 mapping(address => bool) public isMarket;     // is this address one of our markets?
-mapping(address => bool) public isCollateralAllowed;  // token whitelist
 ```
 
 #### Constructor
 
 ```solidity
-constructor(address admin, uint64 minDuration_, uint256 minLiquidity_, uint16 maxFeeBps_, address collateral) {
-    if (admin == address(0) || minDuration_ == 0 || minLiquidity_ == 0 || maxFeeBps_ > BPS) revert InvalidConfig();
+constructor(address admin, uint256 minLiquidity_, address collateral_) {
+    if (admin == address(0) || collateral_ == address(0) || minLiquidity_ == 0) revert InvalidConfig();
+    collateral = IERC20(collateral_);
     ...
     OutcomeToken token = new OutcomeToken(address(this));
     outcomeToken = token;
     implementation = address(new Market(address(this), token));
     _grantRole(DEFAULT_ADMIN_ROLE, admin);
-    _grantRole(MARKET_CREATOR_ROLE, admin);
-    if (collateral != address(0)) _setCollateralAllowed(collateral, true);
 }
 ```
 
 - `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token)` deploys the implementation and tells it both addresses. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
 - Zero minimums are rejected, because a market that closes instantly or has an empty pool makes no sense. This also lets `_validate` use simpler checks.
-- `DEFAULT_ADMIN_ROLE` can grant and revoke roles and manage the collateral whitelist. `MARKET_CREATOR_ROLE` can create markets.
+- The collateral token is fixed forever. Only USDC is supported, so there is no whitelist to manage; supporting another token means deploying a new factory.
+- `DEFAULT_ADMIN_ROLE` can create markets and grant or revoke the role for other admins.
 - The limits are constructor parameters (Q7), so the deploy script can use 10 minutes for a demo and longer values elsewhere.
 
 #### `createMarket`
 
 ```solidity
 function createMarket(CreateParams calldata p)
-    external nonReentrant onlyRole(MARKET_CREATOR_ROLE)
+    external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE)
     returns (uint256 marketId, address market)
 {
     _validate(p);
@@ -449,9 +447,9 @@ function createMarket(CreateParams calldata p)
     markets[marketId] = market;
     isMarket[market] = true;
     outcomeToken.registerMarket(marketId, market);
-    IERC20(p.collateral).safeTransferFrom(msg.sender, market, p.initialLiquidity);
+    collateral.safeTransferFrom(msg.sender, market, p.initialLiquidity);
     IMarket(market).initialize(IMarket.InitParams({ ... creator: msg.sender, ... }));
-    _emitMarketCreated(marketId, market, p);
+    emit MarketCreated(marketId, market, msg.sender, ...);
 }
 ```
 
@@ -461,17 +459,12 @@ This is the sequence from section 2. Some details:
 - **Order matters.** Registration happens before `initialize`, because `initialize` mints tokens and `OutcomeToken` only allows a *registered* market to mint. The USDC transfer happens before `initialize`, because `initialize` checks that the money arrived. Because `initialize` only accepts the factory as caller, nothing can sneak in between these steps.
 - The USDC goes **directly from the admin to the market**. The factory never holds anyone's money, and each market's funds are isolated (the benefit of clones).
 - `creator: msg.sender` is set by the factory, not taken from the input, so nobody can pretend to be someone else.
-- `_emitMarketCreated` is a separate function only because of a compiler limit. Solidity can juggle at most 16 local values at once ("stack too deep"), and an 11-field event plus everything else in `createMarket` would exceed that.
 
 #### `_validate`: the input checks (E1-2)
 
 ```solidity
-if (!isCollateralAllowed[p.collateral]) revert CollateralNotAllowed(p.collateral);
 if (p.arbitrator == address(0)) revert ZeroArbitrator();
-uint256 earliestClose = block.timestamp + minDuration;
-if (p.closeTime < earliestClose) revert CloseTimeTooSoon(...);
-if (p.resolutionDeadline <= p.closeTime) revert InvalidResolutionDeadline(...);
-if (p.feeBps > maxFeeBps) revert FeeTooHigh(...);
+if (p.closeTime <= block.timestamp) revert CloseTimeInPast(...);
 if (p.initialYesProbabilityBps != FIFTY_FIFTY_BPS) revert UnsupportedInitialProbability(...);
 if (p.initialLiquidity < minLiquidity) revert LiquidityTooLow(...);
 if (p.specHash == bytes32(0)) revert EmptySpecHash();
@@ -480,25 +473,22 @@ if (bytes(p.specCID).length == 0) revert EmptySpecCID();
 
 | Check | Why |
 |---|---|
-| Collateral whitelisted | Stops someone using a fake or broken token as "money" |
 | Arbitrator ≠ 0 | Address 0 can never sign anything, so the market could never be resolved |
-| Close time far enough in the future | A market that closes instantly is useless. Since `minDuration` is never 0, this also rejects close times in the past |
-| Deadline after close time | You can't resolve before trading ends |
-| Fee ≤ maximum | Protects traders from extreme fees |
+| Close time in the future | A market closing at or before now would start `Closed`, with its seed USDC locked and no way to trade. Only admins create markets, so there is no minimum duration beyond that |
 | Probability = 50% | Only 50/50 is supported for now (Q3). The field exists so adding custom odds later doesn't change the interface |
 | Liquidity ≥ minimum | Tiny pools make prices swing wildly. Since `minLiquidity` is never 0, this also rules out an empty pool, whose 0/0 price would crash `priceYes()` |
 | Spec hash and CID not empty | Every market must have committed rules (Q5) |
 
 Arbitrator = creator is deliberately **allowed** (Q4).
 
-`setCollateralAllowed` lets the admin add or remove tokens from the whitelist and emits an event so the indexer knows.
+There is no collateral check: the creator can't choose the token, so a fake or broken token can't be used as "money".
 
 #### Known lint warnings
 
 `forge build` shows a few lint warnings. They are expected and should be noted in `threat-model.md`:
 
 - **block-timestamp**: validators can shift `block.timestamp` by a few seconds. That's irrelevant for close times measured in minutes or days.
-- **reentrancy-events**: `MarketCreated` is emitted after external calls. That's safe here because `createMarket` is `nonReentrant` and only calls our own contracts plus a whitelisted collateral token.
+- **reentrancy-events**: `MarketCreated` is emitted after external calls. That's safe here because `createMarket` is `nonReentrant` and only calls our own contracts plus the fixed collateral token.
 
 ---
 
@@ -512,7 +502,7 @@ Foundry tests are written in Solidity. Every function starting with `test` is ru
 function setUp() public {
     vm.warp(1_760_000_000);                   // set the blockchain clock to a fixed time
     usdc = new MockUSDC();
-    factory = new MarketFactory(admin, MIN_DURATION, MIN_LIQUIDITY, MAX_FEE_BPS, address(usdc));
+    factory = new MarketFactory(admin, MIN_LIQUIDITY, address(usdc));
     usdc.mint(admin, 1_000_000e6);            // give the admin 1M fake USDC
     vm.prank(admin);
     usdc.approve(address(factory), type(uint256).max);  // admin allows the factory to take USDC
@@ -530,14 +520,14 @@ function setUp() public {
 | `vm.expectEmit(...)` | The next call must emit this exact event |
 | `bound(x, min, max)` | Squeezes a random fuzz value into a range |
 
-> **Pitfall:** `prank` and `expectRevert` apply to the **next call**, and reading a value from a contract (e.g. `factory.MARKET_CREATOR_ROLE()`) *is* a call. Always read values into local variables first, then call `vm.prank` / `vm.expectRevert`, then make the call you're testing. This bug happened twice while writing these tests.
+> **Pitfall:** `prank` and `expectRevert` apply to the **next call**, and reading a value from a contract (e.g. `factory.DEFAULT_ADMIN_ROLE()`) *is* a call. Always read values into local variables first, then call `vm.prank` / `vm.expectRevert`, then make the call you're testing. This bug happened twice while writing these tests.
 
 **Test groups:**
 
 | Group | Examples | What it proves |
 |---|---|---|
 | Normal flow | `StoresParameters`, `EmitsMarketCreated`, `IdsIncrementFromOne`, `MovesCollateralAndSeedsPools`, `StartsAtFiftyFifty` | Creation works and everything is saved correctly |
-| Access control | `CallerIsNotMarketCreator`, `GrantedCreatorCanCreate`, `CollateralNotApproved` | Only admins can create; the creator must approve USDC first |
+| Access control | `CallerIsNotAdmin`, `GrantedAdminCanCreate`, `CollateralNotApproved` | Only admins can create; the creator must approve USDC first |
 | Validation | One `RevertWhen_…` test per check, plus `AcceptsExactMinimums` | Every bad input is rejected; values exactly at the limit are accepted |
 | State machine | `ClosedIsDerivedFromCloseTime` | 1 second before close → Open, at close → Closed |
 | Clone and token safety | `MarketInitializedTwice`, `ImplementationInitialized`, `NonMarketMints`, `MarketMintsAnotherMarketsToken` | Nobody can hijack a market or mint tokens they shouldn't |
@@ -560,20 +550,19 @@ This is the **collateral invariant** from the project plan: the market always ho
 ## 5. The deploy script (`script/DeployMarketFactory.s.sol`)
 
 ```solidity
-uint64 minDuration = SafeCast.toUint64(vm.envOr("MIN_DURATION", uint256(10 minutes)));
-...
+uint256 minLiquidity = vm.envOr("MIN_LIQUIDITY", uint256(10e6));
+collateral = vm.envOr("COLLATERAL", address(0));
 require(collateral != address(0) || _isTestChain(), "Set COLLATERAL: MockUSDC is test-chain only");
 
 vm.startBroadcast();
 address admin = vm.envOr("ADMIN", msg.sender);
 require(admin != DEFAULT_SENDER, "No deployer wallet: ...");
 if (collateral == address(0)) collateral = address(new MockUSDC());
-factory = new MarketFactory(admin, minDuration, minLiquidity, maxFeeBps, collateral);
+factory = new MarketFactory(admin, minLiquidity, collateral);
 vm.stopBroadcast();
 ```
 
-- `vm.envOr("X", default)` reads an environment variable or falls back to the default. This is how you change the Q7 limits without editing code.
-- **`SafeCast`** reverts when a value doesn't fit the smaller number type. A plain `uint16(70000)` would silently wrap around to 4464, so a typo like `MAX_FEE_BPS=70000` would deploy a 44.6% fee cap.
+- `vm.envOr("X", default)` reads an environment variable or falls back to the default. This is how you change the Q7 limit without editing code.
 - **MockUSDC guard:** anyone can mint MockUSDC, so the script only deploys it on Anvil and the Sepolia testnets (Base, Ethereum, Arbitrum). On any other chain you must pass `COLLATERAL`.
 - **Admin guard:** if you forget to pass a wallet, Foundry uses a built-in default address that nobody controls. Making that the admin would lock the factory forever, so the script refuses.
 - Everything between `startBroadcast` and `stopBroadcast` becomes **real transactions** when you run with `--broadcast`. Without that flag it's only a simulation.
@@ -581,11 +570,9 @@ vm.stopBroadcast();
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `MIN_DURATION` | 600 (10 min) | Shortest allowed time until close |
 | `MIN_LIQUIDITY` | 10000000 (10 mUSDC) | Smallest seed amount |
-| `MAX_FEE_BPS` | 500 (5%) | Highest allowed trading fee |
 | `COLLATERAL` | deploy new MockUSDC (test chains only) | Existing collateral token address. Required on other chains |
-| `ADMIN` | the deploying wallet | Who gets the admin and creator roles |
+| `ADMIN` | the deploying wallet | Who gets the admin role (can create markets) |
 
 To try it locally:
 

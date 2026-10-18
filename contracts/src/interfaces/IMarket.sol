@@ -29,8 +29,6 @@ interface IMarket {
         address arbitrator;
         address collateral;
         uint64 closeTime;
-        uint64 resolutionDeadline;
-        uint16 feeBps;
         bytes32 specHash;
         uint256 initialLiquidity;
     }
@@ -58,8 +56,10 @@ interface IMarket {
     function arbitrator() external view returns (address);
     function collateral() external view returns (IERC20);
     function closeTime() external view returns (uint64);
+    /// @notice closeTime + RESOLUTION_WINDOW. After this, an unresolved market can be cancelled.
     function resolutionDeadline() external view returns (uint64);
-    function feeBps() external view returns (uint16);
+    function FEE_BPS() external view returns (uint16);
+    function RESOLUTION_WINDOW() external view returns (uint64);
     function specHash() external view returns (bytes32);
     function yesTokenId() external view returns (uint256);
     function noTokenId() external view returns (uint256);

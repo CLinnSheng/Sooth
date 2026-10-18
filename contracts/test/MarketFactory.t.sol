@@ -15,9 +15,7 @@ import {IOutcomeToken} from "../src/interfaces/IOutcomeToken.sol";
 import {OutcomeTokenId} from "../src/libraries/OutcomeTokenId.sol";
 
 contract MarketFactoryTest is Test {
-    uint64 constant MIN_DURATION = 10 minutes;
-    uint256 constant MIN_LIQUIDITY = 10e6; // 10 mUSDC
-    uint16 constant MAX_FEE_BPS = 500;
+    uint256 constant MIN_LIQUIDITY = 10e6; // 10 mUSDC, must match MarketFactory.MIN_LIQUIDITY
     uint256 constant LIQUIDITY = 100e6;
     bytes32 constant SPEC_HASH = keccak256('{"question":"Will BTC/USD exceed $150,000 before 31 Dec 2026?"}');
     string constant SPEC_CID = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
@@ -33,7 +31,7 @@ contract MarketFactoryTest is Test {
     function setUp() public {
         vm.warp(1_760_000_000);
         usdc = new MockUSDC();
-        factory = new MarketFactory(admin, MIN_DURATION, MIN_LIQUIDITY, MAX_FEE_BPS, address(usdc));
+        factory = new MarketFactory(admin, address(usdc));
         token = factory.outcomeToken();
 
         usdc.mint(admin, 1_000_000e6);
@@ -43,11 +41,8 @@ contract MarketFactoryTest is Test {
 
     function _params() internal view returns (IMarketFactory.CreateParams memory) {
         return IMarketFactory.CreateParams({
-            collateral: address(usdc),
             arbitrator: arbitrator,
             closeTime: uint64(block.timestamp + 7 days),
-            resolutionDeadline: uint64(block.timestamp + 14 days),
-            feeBps: 200,
             initialYesProbabilityBps: 5_000,
             specHash: SPEC_HASH,
             specCID: SPEC_CID,
@@ -83,15 +78,16 @@ contract MarketFactoryTest is Test {
         assertEq(m.arbitrator(), arbitrator);
         assertEq(address(m.collateral()), address(usdc));
         assertEq(m.closeTime(), p.closeTime);
-        assertEq(m.resolutionDeadline(), p.resolutionDeadline);
-        assertEq(m.feeBps(), p.feeBps);
+        assertEq(m.resolutionDeadline(), p.closeTime + 7 days);
+        assertEq(m.FEE_BPS(), 100);
         assertEq(m.specHash(), SPEC_HASH);
         assertEq(m.yesTokenId(), OutcomeTokenId.compute(id, IMarket.Outcome.Yes));
         assertEq(m.noTokenId(), OutcomeTokenId.compute(id, IMarket.Outcome.No));
         assertEq(uint8(m.state()), uint8(IMarket.State.Open));
 
         assertEq(factory.markets(id), address(m));
-        assertTrue(factory.isMarket(address(m)));
+        assertEq(address(factory.collateral()), address(usdc));
+        assertEq(factory.MIN_LIQUIDITY(), MIN_LIQUIDITY);
     }
 
     function test_CreateMarket_EmitsMarketCreated() public {
@@ -106,8 +102,6 @@ contract MarketFactoryTest is Test {
             arbitrator,
             address(usdc),
             p.closeTime,
-            p.resolutionDeadline,
-            p.feeBps,
             SPEC_HASH,
             SPEC_CID,
             LIQUIDITY
@@ -168,9 +162,7 @@ contract MarketFactoryTest is Test {
 
     function test_CreateMarket_AcceptsExactMinimums() public {
         IMarketFactory.CreateParams memory p = _params();
-        p.closeTime = uint64(block.timestamp + MIN_DURATION);
-        p.resolutionDeadline = p.closeTime + 1;
-        p.feeBps = MAX_FEE_BPS;
+        p.closeTime = uint64(block.timestamp + 1);
         p.initialLiquidity = MIN_LIQUIDITY;
         _create(p);
     }
@@ -179,15 +171,15 @@ contract MarketFactoryTest is Test {
     // Access control
     // ---------------------------------------------------------------
 
-    function test_RevertWhen_CallerIsNotMarketCreator() public {
-        bytes32 role = factory.MARKET_CREATOR_ROLE();
+    function test_RevertWhen_CallerIsNotAdmin() public {
+        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         factory.createMarket(_params());
     }
 
-    function test_GrantedCreatorCanCreate() public {
-        bytes32 role = factory.MARKET_CREATOR_ROLE();
+    function test_GrantedAdminCanCreate() public {
+        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
         vm.prank(admin);
         factory.grantRole(role, alice);
 
@@ -201,7 +193,7 @@ contract MarketFactoryTest is Test {
     }
 
     function test_RevertWhen_CollateralNotApproved() public {
-        bytes32 role = factory.MARKET_CREATOR_ROLE();
+        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
         vm.prank(admin);
         factory.grantRole(role, alice);
         usdc.mint(alice, LIQUIDITY);
@@ -213,31 +205,9 @@ contract MarketFactoryTest is Test {
         factory.createMarket(_params());
     }
 
-    function test_RevertWhen_NonAdminSetsCollateral() public {
-        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
-        factory.setCollateralAllowed(alice, true);
-    }
-
     // ---------------------------------------------------------------
     // Validation (E1-2)
     // ---------------------------------------------------------------
-
-    function test_RevertWhen_CollateralNotAllowed() public {
-        MockUSDC other = new MockUSDC();
-        IMarketFactory.CreateParams memory p = _params();
-        p.collateral = address(other);
-        _expectCreateRevert(p, abi.encodeWithSelector(IMarketFactory.CollateralNotAllowed.selector, address(other)));
-    }
-
-    function test_RevertWhen_CollateralDisallowedAfterwards() public {
-        vm.prank(admin);
-        factory.setCollateralAllowed(address(usdc), false);
-        _expectCreateRevert(
-            _params(), abi.encodeWithSelector(IMarketFactory.CollateralNotAllowed.selector, address(usdc))
-        );
-    }
 
     function test_RevertWhen_ArbitratorIsZero() public {
         IMarketFactory.CreateParams memory p = _params();
@@ -249,37 +219,16 @@ contract MarketFactoryTest is Test {
         IMarketFactory.CreateParams memory p = _params();
         p.closeTime = uint64(block.timestamp - 1);
         _expectCreateRevert(
-            p,
-            abi.encodeWithSelector(
-                IMarketFactory.CloseTimeTooSoon.selector, p.closeTime, block.timestamp + MIN_DURATION
-            )
+            p, abi.encodeWithSelector(IMarketFactory.CloseTimeInPast.selector, p.closeTime, block.timestamp)
         );
     }
 
-    function test_RevertWhen_CloseTimeTooSoon() public {
+    function test_RevertWhen_CloseTimeIsNow() public {
         IMarketFactory.CreateParams memory p = _params();
-        p.closeTime = uint64(block.timestamp + MIN_DURATION - 1);
+        p.closeTime = uint64(block.timestamp);
         _expectCreateRevert(
-            p,
-            abi.encodeWithSelector(
-                IMarketFactory.CloseTimeTooSoon.selector, p.closeTime, block.timestamp + MIN_DURATION
-            )
+            p, abi.encodeWithSelector(IMarketFactory.CloseTimeInPast.selector, p.closeTime, block.timestamp)
         );
-    }
-
-    function test_RevertWhen_ResolutionDeadlineNotAfterClose() public {
-        IMarketFactory.CreateParams memory p = _params();
-        p.resolutionDeadline = p.closeTime;
-        _expectCreateRevert(
-            p,
-            abi.encodeWithSelector(IMarketFactory.InvalidResolutionDeadline.selector, p.resolutionDeadline, p.closeTime)
-        );
-    }
-
-    function test_RevertWhen_FeeTooHigh() public {
-        IMarketFactory.CreateParams memory p = _params();
-        p.feeBps = MAX_FEE_BPS + 1;
-        _expectCreateRevert(p, abi.encodeWithSelector(IMarketFactory.FeeTooHigh.selector, p.feeBps, MAX_FEE_BPS));
     }
 
     function test_RevertWhen_InitialProbabilityNotFiftyFifty() public {
@@ -312,16 +261,10 @@ contract MarketFactoryTest is Test {
 
     function test_RevertWhen_FactoryConfigInvalid() public {
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(address(0), MIN_DURATION, MIN_LIQUIDITY, MAX_FEE_BPS, address(usdc));
+        new MarketFactory(address(0), address(usdc));
 
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(admin, MIN_DURATION, MIN_LIQUIDITY, 10_001, address(usdc));
-
-        vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(admin, 0, MIN_LIQUIDITY, MAX_FEE_BPS, address(usdc));
-
-        vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(admin, MIN_DURATION, 0, MAX_FEE_BPS, address(usdc));
+        new MarketFactory(admin, address(0));
     }
 
     // ---------------------------------------------------------------
@@ -386,8 +329,6 @@ contract MarketFactoryTest is Test {
             arbitrator: arbitrator,
             collateral: address(usdc),
             closeTime: uint64(block.timestamp + 7 days),
-            resolutionDeadline: uint64(block.timestamp + 14 days),
-            feeBps: 200,
             specHash: SPEC_HASH,
             initialLiquidity: LIQUIDITY
         });
@@ -472,16 +413,13 @@ contract MarketFactoryTest is Test {
     // Fuzz: collateral invariant at creation (E8-4)
     // ---------------------------------------------------------------
 
-    function testFuzz_CreateMarket_FullyCollateralized(uint64 closeOffset, uint256 liquidity, uint16 feeBps) public {
-        closeOffset = uint64(bound(closeOffset, MIN_DURATION, 365 days));
+    function testFuzz_CreateMarket_FullyCollateralized(uint64 closeOffset, uint256 liquidity) public {
+        closeOffset = uint64(bound(closeOffset, 1, 365 days));
         liquidity = bound(liquidity, MIN_LIQUIDITY, usdc.balanceOf(admin));
-        feeBps = uint16(bound(feeBps, 0, MAX_FEE_BPS));
 
         IMarketFactory.CreateParams memory p = _params();
         p.closeTime = uint64(block.timestamp) + closeOffset;
-        p.resolutionDeadline = p.closeTime + 1 days;
         p.initialLiquidity = liquidity;
-        p.feeBps = feeBps;
 
         (, Market m) = _create(p);
 
