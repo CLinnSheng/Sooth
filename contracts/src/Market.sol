@@ -18,13 +18,16 @@ contract Market is Initializable, ERC1155Holder, IMarket {
     address public immutable factory;
     IOutcomeToken public immutable outcomeToken;
 
+    /// @dev Flat 1% fee on every trade, the same for all markets.
+    uint16 public constant FEE_BPS = 100;
+    /// @dev How long the arbitrator has after close to resolve before the market can be cancelled.
+    uint64 public constant RESOLUTION_WINDOW = 7 days;
+
     uint256 public marketId;
     address public creator;
     address public arbitrator;
     IERC20 public collateral;
     uint64 public closeTime;
-    uint64 public resolutionDeadline;
-    uint16 public feeBps;
     bytes32 public specHash;
 
     /// @dev AMM reserves of YES and NO tokens held by this contract.
@@ -48,8 +51,6 @@ contract Market is Initializable, ERC1155Holder, IMarket {
         arbitrator = p.arbitrator;
         collateral = IERC20(p.collateral);
         closeTime = p.closeTime;
-        resolutionDeadline = p.resolutionDeadline;
-        feeBps = p.feeBps;
         specHash = p.specHash;
 
         _state = State.Open;
@@ -76,6 +77,10 @@ contract Market is Initializable, ERC1155Holder, IMarket {
     function state() public view returns (State) {
         if (_state == State.Open && block.timestamp >= closeTime) return State.Closed;
         return _state;
+    }
+
+    function resolutionDeadline() external view returns (uint64) {
+        return closeTime + RESOLUTION_WINDOW;
     }
 
     function priceYes() external view returns (uint256) {
