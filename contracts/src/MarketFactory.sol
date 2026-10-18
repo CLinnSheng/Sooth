@@ -26,6 +26,7 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 
     address public immutable implementation;
     IOutcomeToken public immutable outcomeToken;
+    IERC20 public immutable collateral;
 
     uint64 public immutable minDuration;
     /// @dev In the collateral token's smallest unit (e.g. 10e6 = 10 USDC with 6 decimals).
@@ -36,13 +37,16 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
     uint256 public marketCount;
     mapping(uint256 marketId => address market) public markets;
     mapping(address market => bool) public isMarket;
-    mapping(address token => bool) public isCollateralAllowed;
 
-    constructor(address admin, uint64 minDuration_, uint256 minLiquidity_, uint16 maxFeeBps_, address collateral) {
-        if (admin == address(0) || minDuration_ == 0 || minLiquidity_ == 0 || maxFeeBps_ > BPS) {
+    constructor(address admin, uint64 minDuration_, uint256 minLiquidity_, uint16 maxFeeBps_, address collateral_) {
+        if (
+            admin == address(0) || collateral_ == address(0) || minDuration_ == 0 || minLiquidity_ == 0
+                || maxFeeBps_ > BPS
+        ) {
             revert InvalidConfig();
         }
 
+        collateral = IERC20(collateral_);
         minDuration = minDuration_;
         minLiquidity = minLiquidity_;
         maxFeeBps = maxFeeBps_;
@@ -53,8 +57,6 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(MARKET_CREATOR_ROLE, admin);
-
-        if (collateral != address(0)) _setCollateralAllowed(collateral, true);
     }
 
     function createMarket(CreateParams calldata p)
@@ -71,14 +73,14 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
         isMarket[market] = true;
 
         outcomeToken.registerMarket(marketId, market);
-        IERC20(p.collateral).safeTransferFrom(msg.sender, market, p.initialLiquidity);
+        collateral.safeTransferFrom(msg.sender, market, p.initialLiquidity);
         IMarket(market)
             .initialize(
                 IMarket.InitParams({
                     marketId: marketId,
                     creator: msg.sender,
                     arbitrator: p.arbitrator,
-                    collateral: p.collateral,
+                    collateral: address(collateral),
                     closeTime: p.closeTime,
                     resolutionDeadline: p.resolutionDeadline,
                     feeBps: p.feeBps,
@@ -90,15 +92,6 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
         _emitMarketCreated(marketId, market, p);
     }
 
-    function setCollateralAllowed(address token, bool allowed) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _setCollateralAllowed(token, allowed);
-    }
-
-    function _setCollateralAllowed(address token, bool allowed) internal {
-        isCollateralAllowed[token] = allowed;
-        emit CollateralAllowed(token, allowed);
-    }
-
     /// @dev Separate function so the 11-field event doesn't overflow createMarket's stack.
     function _emitMarketCreated(uint256 marketId, address market, CreateParams calldata p) internal {
         emit MarketCreated(
@@ -106,7 +99,7 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
             market,
             msg.sender,
             p.arbitrator,
-            p.collateral,
+            address(collateral),
             p.closeTime,
             p.resolutionDeadline,
             p.feeBps,
@@ -117,7 +110,6 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
     }
 
     function _validate(CreateParams calldata p) internal view {
-        if (!isCollateralAllowed[p.collateral]) revert CollateralNotAllowed(p.collateral);
         // The arbitrator may be the creator (Q4); the risk is documented in the threat model.
         if (p.arbitrator == address(0)) revert ZeroArbitrator();
 

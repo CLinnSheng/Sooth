@@ -43,7 +43,6 @@ contract MarketFactoryTest is Test {
 
     function _params() internal view returns (IMarketFactory.CreateParams memory) {
         return IMarketFactory.CreateParams({
-            collateral: address(usdc),
             arbitrator: arbitrator,
             closeTime: uint64(block.timestamp + 7 days),
             resolutionDeadline: uint64(block.timestamp + 14 days),
@@ -92,6 +91,7 @@ contract MarketFactoryTest is Test {
 
         assertEq(factory.markets(id), address(m));
         assertTrue(factory.isMarket(address(m)));
+        assertEq(address(factory.collateral()), address(usdc));
     }
 
     function test_CreateMarket_EmitsMarketCreated() public {
@@ -213,31 +213,9 @@ contract MarketFactoryTest is Test {
         factory.createMarket(_params());
     }
 
-    function test_RevertWhen_NonAdminSetsCollateral() public {
-        bytes32 role = factory.DEFAULT_ADMIN_ROLE();
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
-        factory.setCollateralAllowed(alice, true);
-    }
-
     // ---------------------------------------------------------------
     // Validation (E1-2)
     // ---------------------------------------------------------------
-
-    function test_RevertWhen_CollateralNotAllowed() public {
-        MockUSDC other = new MockUSDC();
-        IMarketFactory.CreateParams memory p = _params();
-        p.collateral = address(other);
-        _expectCreateRevert(p, abi.encodeWithSelector(IMarketFactory.CollateralNotAllowed.selector, address(other)));
-    }
-
-    function test_RevertWhen_CollateralDisallowedAfterwards() public {
-        vm.prank(admin);
-        factory.setCollateralAllowed(address(usdc), false);
-        _expectCreateRevert(
-            _params(), abi.encodeWithSelector(IMarketFactory.CollateralNotAllowed.selector, address(usdc))
-        );
-    }
 
     function test_RevertWhen_ArbitratorIsZero() public {
         IMarketFactory.CreateParams memory p = _params();
@@ -313,6 +291,9 @@ contract MarketFactoryTest is Test {
     function test_RevertWhen_FactoryConfigInvalid() public {
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
         new MarketFactory(address(0), MIN_DURATION, MIN_LIQUIDITY, MAX_FEE_BPS, address(usdc));
+
+        vm.expectRevert(IMarketFactory.InvalidConfig.selector);
+        new MarketFactory(admin, MIN_DURATION, MIN_LIQUIDITY, MAX_FEE_BPS, address(0));
 
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
         new MarketFactory(admin, MIN_DURATION, MIN_LIQUIDITY, 10_001, address(usdc));

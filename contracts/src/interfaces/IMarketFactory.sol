@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IOutcomeToken} from "./IOutcomeToken.sol";
 
 /// @title IMarketFactory
 /// @notice Creates binary prediction markets as EIP-1167 clones. Creation is admin-only
-///         for now (MARKET_CREATOR_ROLE), so there is no creator bond yet.
+///         for now (MARKET_CREATOR_ROLE), so there is no creator bond yet. Every market
+///         uses the single collateral token fixed at deployment (USDC).
 interface IMarketFactory {
     struct CreateParams {
-        address collateral;
         address arbitrator;
         uint64 closeTime;
         uint64 resolutionDeadline;
@@ -37,10 +38,7 @@ interface IMarketFactory {
         uint256 initialLiquidity
     );
 
-    event CollateralAllowed(address indexed token, bool allowed);
-
     error InvalidConfig();
-    error CollateralNotAllowed(address token);
     error ZeroArbitrator();
     error CloseTimeTooSoon(uint64 closeTime, uint256 earliestAllowed);
     error InvalidResolutionDeadline(uint64 resolutionDeadline, uint64 closeTime);
@@ -54,16 +52,14 @@ interface IMarketFactory {
     ///         The caller must first approve this factory for `initialLiquidity`.
     function createMarket(CreateParams calldata p) external returns (uint256 marketId, address market);
 
-    function setCollateralAllowed(address token, bool allowed) external;
-
     function MARKET_CREATOR_ROLE() external view returns (bytes32);
     function implementation() external view returns (address);
     function outcomeToken() external view returns (IOutcomeToken);
+    function collateral() external view returns (IERC20);
     function minDuration() external view returns (uint64);
     function minLiquidity() external view returns (uint256);
     function maxFeeBps() external view returns (uint16);
     function marketCount() external view returns (uint256);
     function markets(uint256 marketId) external view returns (address);
     function isMarket(address market) external view returns (bool);
-    function isCollateralAllowed(address token) external view returns (bool);
 }

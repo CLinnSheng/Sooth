@@ -181,7 +181,6 @@ Interfaces also hold the shared **types**, **events** and **errors**.
 
 ```solidity
 struct CreateParams {
-    address collateral;              // which token is used as money (USDC)
     address arbitrator;              // who will resolve the market
     uint64  closeTime;               // when trading stops (unix seconds, UTC)
     uint64  resolutionDeadline;      // if no outcome by now → cancel/refund later
@@ -192,6 +191,8 @@ struct CreateParams {
     uint256 initialLiquidity;        // how much USDC to seed the market with
 }
 ```
+
+There is no `collateral` field: every market uses the single token (USDC) fixed in the factory at deployment.
 
 `uint64` and `uint16` are smaller number types. They're big enough for timestamps and percentages, and the compiler can pack them together to save storage.
 
@@ -406,6 +407,7 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 ```solidity
 address public immutable implementation;      // the Market "master copy"
 IOutcomeToken public immutable outcomeToken;
+IERC20  public immutable collateral;          // the one token used as money (USDC)
 uint64  public immutable minDuration;         // Q7 limits, fixed at deploy
 uint256 public immutable minLiquidity;
 uint16  public immutable maxFeeBps;
@@ -413,27 +415,28 @@ uint16  public immutable maxFeeBps;
 uint256 public marketCount;                   // also the last market ID
 mapping(uint256 => address) public markets;   // id → market address
 mapping(address => bool) public isMarket;     // is this address one of our markets?
-mapping(address => bool) public isCollateralAllowed;  // token whitelist
 ```
 
 #### Constructor
 
 ```solidity
-constructor(address admin, uint64 minDuration_, uint256 minLiquidity_, uint16 maxFeeBps_, address collateral) {
-    if (admin == address(0) || minDuration_ == 0 || minLiquidity_ == 0 || maxFeeBps_ > BPS) revert InvalidConfig();
+constructor(address admin, uint64 minDuration_, uint256 minLiquidity_, uint16 maxFeeBps_, address collateral_) {
+    if (admin == address(0) || collateral_ == address(0) || minDuration_ == 0 || minLiquidity_ == 0 || maxFeeBps_ > BPS)
+        revert InvalidConfig();
+    collateral = IERC20(collateral_);
     ...
     OutcomeToken token = new OutcomeToken(address(this));
     outcomeToken = token;
     implementation = address(new Market(address(this), token));
     _grantRole(DEFAULT_ADMIN_ROLE, admin);
     _grantRole(MARKET_CREATOR_ROLE, admin);
-    if (collateral != address(0)) _setCollateralAllowed(collateral, true);
 }
 ```
 
 - `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token)` deploys the implementation and tells it both addresses. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
 - Zero minimums are rejected, because a market that closes instantly or has an empty pool makes no sense. This also lets `_validate` use simpler checks.
-- `DEFAULT_ADMIN_ROLE` can grant and revoke roles and manage the collateral whitelist. `MARKET_CREATOR_ROLE` can create markets.
+- The collateral token is fixed forever. Only USDC is supported, so there is no whitelist to manage; supporting another token means deploying a new factory.
+- `DEFAULT_ADMIN_ROLE` can grant and revoke roles. `MARKET_CREATOR_ROLE` can create markets.
 - The limits are constructor parameters (Q7), so the deploy script can use 10 minutes for a demo and longer values elsewhere.
 
 #### `createMarket`
@@ -449,7 +452,7 @@ function createMarket(CreateParams calldata p)
     markets[marketId] = market;
     isMarket[market] = true;
     outcomeToken.registerMarket(marketId, market);
-    IERC20(p.collateral).safeTransferFrom(msg.sender, market, p.initialLiquidity);
+    collateral.safeTransferFrom(msg.sender, market, p.initialLiquidity);
     IMarket(market).initialize(IMarket.InitParams({ ... creator: msg.sender, ... }));
     _emitMarketCreated(marketId, market, p);
 }
@@ -466,7 +469,6 @@ This is the sequence from section 2. Some details:
 #### `_validate`: the input checks (E1-2)
 
 ```solidity
-if (!isCollateralAllowed[p.collateral]) revert CollateralNotAllowed(p.collateral);
 if (p.arbitrator == address(0)) revert ZeroArbitrator();
 uint256 earliestClose = block.timestamp + minDuration;
 if (p.closeTime < earliestClose) revert CloseTimeTooSoon(...);
@@ -480,7 +482,6 @@ if (bytes(p.specCID).length == 0) revert EmptySpecCID();
 
 | Check | Why |
 |---|---|
-| Collateral whitelisted | Stops someone using a fake or broken token as "money" |
 | Arbitrator ≠ 0 | Address 0 can never sign anything, so the market could never be resolved |
 | Close time far enough in the future | A market that closes instantly is useless. Since `minDuration` is never 0, this also rejects close times in the past |
 | Deadline after close time | You can't resolve before trading ends |
@@ -491,14 +492,14 @@ if (bytes(p.specCID).length == 0) revert EmptySpecCID();
 
 Arbitrator = creator is deliberately **allowed** (Q4).
 
-`setCollateralAllowed` lets the admin add or remove tokens from the whitelist and emits an event so the indexer knows.
+There is no collateral check: the creator can't choose the token, so a fake or broken token can't be used as "money".
 
 #### Known lint warnings
 
 `forge build` shows a few lint warnings. They are expected and should be noted in `threat-model.md`:
 
 - **block-timestamp**: validators can shift `block.timestamp` by a few seconds. That's irrelevant for close times measured in minutes or days.
-- **reentrancy-events**: `MarketCreated` is emitted after external calls. That's safe here because `createMarket` is `nonReentrant` and only calls our own contracts plus a whitelisted collateral token.
+- **reentrancy-events**: `MarketCreated` is emitted after external calls. That's safe here because `createMarket` is `nonReentrant` and only calls our own contracts plus the fixed collateral token.
 
 ---
 
