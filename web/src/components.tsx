@@ -34,19 +34,26 @@ import {
 import { useWallet } from './wallet'
 
 const press = 'transition active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100'
-const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900'
+// System blue reads on both light and dark surfaces.
+const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0a84ff]'
+
+// Deterministic gradient so a wallet is recognisable without reading its hex address.
+const avatar = (address: string) => {
+  const hue = parseInt(address.slice(2, 8), 16) % 360
+  return `linear-gradient(135deg, hsl(${hue} 85% 60%), hsl(${(hue + 70) % 360} 85% 45%))`
+}
 
 export function Nav() {
   const { wallet } = useWallet()
   const { isConnecting, isReconnecting } = useAccount()
   const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
   const link = ({ isActive }: { isActive: boolean }) =>
-    `rounded-md px-3 py-1.5 text-sm ${focus} ${isActive ? 'font-medium text-zinc-900' : 'text-zinc-500 hover:text-zinc-900'}`
+    `rounded-md px-3 py-1.5 text-sm ${focus} ${isActive ? 'font-medium text-white' : 'text-muted hover:text-white'}`
   return (
-    <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/80 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b border-line bg-canvas/75 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
         <Link to="/" className={`mr-1 flex items-center gap-2 rounded-md font-semibold sm:mr-4 ${focus}`}>
-          <span className="grid size-7 place-items-center rounded-md bg-zinc-900 text-white">
+          <span className="grid size-7 place-items-center rounded-md bg-white text-black">
             <TrendingUp size={16} />
           </span>
           Sooth
@@ -73,30 +80,31 @@ export function Nav() {
                         type="button"
                         onClick={() => switchChain({ chainId: baseSepolia.id })}
                         disabled={isSwitchingChain}
-                        className={`flex items-center gap-2 whitespace-nowrap rounded-lg bg-amber-100 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${focus}`}
+                        className={`flex items-center gap-2 whitespace-nowrap rounded-full bg-amber-400/15 px-3 py-1.5 text-sm font-medium text-amber-300 hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${focus}`}
                       >
                         {isSwitchingChain ? <LoaderCircle size={15} className="animate-spin" /> : <TriangleAlert size={15} />}
                         {isSwitchingChain ? 'Switching…' : <>Switch<span className="hidden sm:inline"> to Base Sepolia</span></>}
                       </button>
                     )}
-                    <div className="flex items-center rounded-lg border border-zinc-200 bg-white text-sm font-medium">
+                    {/* One pill: balance is the headline, the address lives in the account sheet. */}
+                    <div className="flex items-center gap-1 rounded-full bg-raised p-1 text-sm font-semibold">
                       {!chain.unsupported && (
                         <Link
                           to="/portfolio"
-                          title="View portfolio"
-                          className={`hidden whitespace-nowrap rounded-l-lg border-r border-zinc-200 px-3 py-1.5 hover:bg-zinc-50 sm:block ${focus}`}
+                          title="USDC on Base Sepolia · view portfolio"
+                          className={`hidden whitespace-nowrap rounded-full py-1 pl-3 pr-2 tracking-tight hover:bg-white/10 sm:block ${focus}`}
                         >
-                          {wallet?.usdc == null ? <span className="text-zinc-400">— USDC</span> : `${usdc(wallet.usdc)} USDC`}
+                          {wallet?.usdc == null ? <span className="text-muted">$—</span> : `$${usdc(wallet.usdc)}`}
                         </Link>
                       )}
                       <button
                         type="button"
                         onClick={openAccountModal}
-                        title="Manage wallet"
-                        className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 hover:bg-zinc-50 ${press} ${focus}`}
-                      >
-                        <Wallet size={15} /> {account.displayName}
-                      </button>
+                        title={`${account.displayName} · manage wallet`}
+                        aria-label="Manage wallet"
+                        style={{ background: avatar(account.address) }}
+                        className={`size-7 rounded-full ring-1 ring-white/15 hover:ring-white/40 ${press} ${focus}`}
+                      />
                     </div>
                   </>
                 ) : (
@@ -104,7 +112,7 @@ export function Nav() {
                     type="button"
                     onClick={openConnectModal}
                     disabled={connecting}
-                    className={`flex items-center gap-2 whitespace-nowrap rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 ${press} ${focus}`}
+                    className={`flex items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted ${press} ${focus}`}
                   >
                     {connecting ? <LoaderCircle size={15} className="animate-spin" /> : <Wallet size={15} />}
                     {connecting ? 'Connecting…' : <>Connect<span className="hidden sm:inline"> wallet</span></>}
