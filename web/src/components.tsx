@@ -147,7 +147,7 @@ export function CategoryLabel({ category }: { category: Category }) {
 export function StatusBadge({ market }: { market: Market }) {
   if (market.status === 'resolved')
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-zinc-900 px-2.5 py-0.5 text-xs font-medium text-white">
+      <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-black">
         <Check size={12} /> Resolved {market.resolvedOutcome}
       </span>
     )
@@ -176,7 +176,7 @@ export function PriceChart({ points, height = 160, axis = false }: { points: num
     <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }} aria-hidden>
       {axis &&
         [0.25, 0.5, 0.75].map((g) => (
-          <line key={g} x1={0} x2={w} y1={(1 - g) * height} y2={(1 - g) * height} className="stroke-zinc-200" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          <line key={g} x1={0} x2={w} y1={(1 - g) * height} y2={(1 - g) * height} className="stroke-line" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
         ))}
       <polyline points={xy} fill="none" className="stroke-yes" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
     </svg>
@@ -337,23 +337,23 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
 
   const row = (label: string, value: ReactNode, strong = false) => (
     <div className="flex justify-between text-sm">
-      <span className="text-zinc-500">{label}</span>
+      <span className="text-muted">{label}</span>
       <span className={strong ? 'font-semibold' : ''}>{value}</span>
     </div>
   )
   const quick = mode === 'Buy' ? [25, 50, 100] : [10, 50, 100]
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5">
+    <div className="flex flex-col gap-4 rounded-3xl bg-surface p-5">
       <h2 className="font-semibold">Trade</h2>
 
-      <div className="grid grid-cols-2 rounded-lg bg-zinc-100 p-1 text-sm">
+      <div className="grid grid-cols-2 rounded-xl bg-raised p-1 text-sm">
         {(['Buy', 'Sell'] as const).map((m) => (
           <button
             key={m}
             aria-pressed={mode === m}
             onClick={() => { setMode(m); setInput(''); setStep('idle') }}
-            className={`rounded-md py-1.5 ${focus} ${mode === m ? 'bg-white font-medium shadow-sm' : 'text-zinc-500'}`}
+            className={`rounded-lg py-1.5 ${focus} ${mode === m ? 'bg-[#636366] font-semibold' : 'text-muted'}`}
           >
             {m}
           </button>
@@ -366,11 +366,11 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex justify-between text-xs text-zinc-500">
+        <div className="flex justify-between text-xs text-muted">
           <label htmlFor="amount">{mode === 'Buy' ? 'Amount' : 'Shares to sell'}</label>
           {wallet && <span>{mode === 'Buy' ? `Balance ${wallet.usdc == null ? '—' : usdc(wallet.usdc)} USDC` : `You hold ${held} ${outcome}`}</span>}
         </div>
-        <div className={`flex items-center rounded-lg border border-zinc-200 px-3 focus-within:border-zinc-900`}>
+        <div className={`flex items-center rounded-xl bg-raised px-3 ring-white/30 focus-within:ring-1`}>
           <input
             id="amount"
             inputMode="decimal"
@@ -379,17 +379,17 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
             onChange={(e) => { if (/^\d*\.?\d{0,6}$/.test(e.target.value)) { setInput(e.target.value); setStep('idle') } }}
             className="w-full bg-transparent py-3 text-2xl font-semibold outline-none"
           />
-          <span className="text-sm text-zinc-500">{mode === 'Buy' ? 'USDC' : outcome}</span>
+          <span className="text-sm text-muted">{mode === 'Buy' ? 'USDC' : outcome}</span>
         </div>
         <div className="grid grid-cols-4 gap-2">
           {quick.map((q) => (
-            <button key={q} onClick={() => setInput(String(q))} className={`rounded-md bg-zinc-100 py-1.5 text-xs hover:bg-zinc-200 ${press} ${focus}`}>
+            <button key={q} onClick={() => setInput(String(q))} className={`rounded-lg bg-raised py-1.5 text-xs font-medium hover:bg-white/15 ${press} ${focus}`}>
               {mode === 'Buy' ? `$${q}` : q}
             </button>
           ))}
           <button
             onClick={() => setInput(String(mode === 'Buy' ? (wallet?.usdc ?? 0) : held))}
-            className={`rounded-md bg-zinc-100 py-1.5 text-xs hover:bg-zinc-200 ${press} ${focus}`}
+            className={`rounded-lg bg-raised py-1.5 text-xs font-medium hover:bg-white/15 ${press} ${focus}`}
           >
             Max
           </button>
@@ -397,11 +397,11 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
       </div>
 
       {amount > 0 && (
-        <div className="flex flex-col gap-2 border-t border-zinc-100 pt-4">
+        <div className="flex flex-col gap-2 border-t border-line pt-4">
           {row('Avg price', cents((buy ?? sell)!.avgPrice, 1))}
           {row(
             'Price impact',
-            <span className={impact > 0.05 ? 'font-medium text-amber-600' : ''}>{(impact * 100).toFixed(1)}%</span>,
+            <span className={impact > 0.05 ? 'font-medium text-amber-400' : ''}>{(impact * 100).toFixed(1)}%</span>,
           )}
           {buy && row('Est. shares', buy.shares.toFixed(1))}
           {buy && row(`Min received (${slippage * 100}% slippage)`, (buy.shares * (1 - slippage)).toFixed(1))}
@@ -409,7 +409,7 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
           {sell && row(`Min received (${slippage * 100}% slippage)`, `${usdc(sell.received * (1 - slippage))} USDC`)}
           {row(`Fee (${FEE * 100}%, included)`, `${usdc((buy ?? sell)!.fee)} USDC`)}
           {buy && row(`Payout if ${outcome} wins`, <span className="text-yes">{usdc(buy.shares)} USDC</span>, true)}
-          <div className="flex items-center justify-between text-xs text-zinc-500">
+          <div className="flex items-center justify-between text-xs text-muted">
             <span>Slippage tolerance</span>
             <div className="flex gap-1">
               {[0.005, 0.01, 0.02].map((s) => (
@@ -417,7 +417,7 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
                   key={s}
                   aria-pressed={slippage === s}
                   onClick={() => setSlippage(s)}
-                  className={`rounded px-1.5 py-0.5 ${focus} ${slippage === s ? 'bg-zinc-900 text-white' : 'bg-zinc-100'}`}
+                  className={`rounded px-1.5 py-0.5 ${focus} ${slippage === s ? 'bg-white text-black' : 'bg-raised'}`}
                 >
                   {s * 100}%
                 </button>
@@ -428,13 +428,13 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
       )}
 
       {mode === 'Buy' && wallet && !approved && amount > 0 && !busy && (
-        <p className="text-xs text-zinc-500">First trade needs two wallet confirmations: approve USDC once, then buy.</p>
+        <p className="text-xs text-muted">First trade needs two wallet confirmations: approve USDC once, then buy.</p>
       )}
 
       <button
         onClick={action.onClick}
         disabled={action.disabled}
-        className={`flex items-center justify-center gap-2 rounded-lg bg-zinc-900 py-3 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 ${press} ${focus}`}
+        className={`flex items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted ${press} ${focus}`}
       >
         {action.label}
       </button>
@@ -448,7 +448,7 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
         </p>
       )}
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted">
         Winning shares redeem for 1 USDC each, losing shares for 0. Estimates can change before your wallet confirms.
       </p>
     </div>
