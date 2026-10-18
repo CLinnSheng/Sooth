@@ -29,7 +29,6 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 
     uint256 public marketCount;
     mapping(uint256 marketId => address market) public markets;
-    mapping(address market => bool) public isMarket;
 
     constructor(address admin, address collateral_) {
         if (admin == address(0) || collateral_ == address(0)) revert InvalidConfig();
@@ -38,6 +37,7 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 
         OutcomeToken token = new OutcomeToken(address(this));
         outcomeToken = token;
+
         implementation = address(new Market(address(this), token));
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -54,10 +54,11 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
         marketId = ++marketCount;
         market = Clones.clone(implementation);
         markets[marketId] = market;
-        isMarket[market] = true;
 
         outcomeToken.registerMarket(marketId, market);
+
         collateral.safeTransferFrom(msg.sender, market, p.initialLiquidity);
+
         IMarket(market)
             .initialize(
                 IMarket.InitParams({

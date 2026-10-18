@@ -86,7 +86,6 @@ contract MarketFactoryTest is Test {
         assertEq(uint8(m.state()), uint8(IMarket.State.Open));
 
         assertEq(factory.markets(id), address(m));
-        assertTrue(factory.isMarket(address(m)));
         assertEq(address(factory.collateral()), address(usdc));
         assertEq(factory.MIN_LIQUIDITY(), MIN_LIQUIDITY);
     }
