@@ -1,14 +1,23 @@
 @import "tailwindcss";
 
-/* Green and red are reserved for outcomes; brand actions stay neutral (zinc). */
+/* Green and red are reserved for outcomes; brand actions stay neutral. */
 @theme {
-  --color-yes: #15803d;
-  --color-yes-soft: #f0fdf4;
-  --color-no: #b91c1c;
-  --color-no-soft: #fef2f2;
+  --color-yes: #30d158;
+  --color-yes-soft: rgb(48 209 88 / 0.16);
+  --color-no: #ff453a;
+  --color-no-soft: rgb(255 69 58 / 0.16);
+
+  /* Dark surfaces, layered by lightness instead of borders (Apple dark palette). */
+  --color-canvas: #000000;
+  --color-surface: #1c1c1e;
+  --color-raised: #2c2c2e;
+  --color-line: #38383a;
+  --color-muted: #8e8e93;
 }
 
 body {
-  @apply bg-zinc-50 text-zinc-900 antialiased;
+  @apply bg-canvas text-white antialiased;
+  /* Native controls (select menus, scrollbars) render dark too. */
+  color-scheme: dark;
   font-variant-numeric: tabular-nums;
 }

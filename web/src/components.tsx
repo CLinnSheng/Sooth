@@ -34,19 +34,26 @@ import {
 import { useWallet } from './wallet'
 
 const press = 'transition active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100'
-const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900'
+// System blue reads on both light and dark surfaces.
+const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0a84ff]'
+
+// Deterministic gradient so a wallet is recognisable without reading its hex address.
+const avatar = (address: string) => {
+  const hue = parseInt(address.slice(2, 8), 16) % 360
+  return `linear-gradient(135deg, hsl(${hue} 85% 60%), hsl(${(hue + 70) % 360} 85% 45%))`
+}
 
 export function Nav() {
   const { wallet } = useWallet()
   const { isConnecting, isReconnecting } = useAccount()
   const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
   const link = ({ isActive }: { isActive: boolean }) =>
-    `rounded-md px-3 py-1.5 text-sm ${focus} ${isActive ? 'font-medium text-zinc-900' : 'text-zinc-500 hover:text-zinc-900'}`
+    `rounded-md px-3 py-1.5 text-sm ${focus} ${isActive ? 'font-medium text-white' : 'text-muted hover:text-white'}`
   return (
-    <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/80 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b border-line bg-canvas/75 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
         <Link to="/" className={`mr-1 flex items-center gap-2 rounded-md font-semibold sm:mr-4 ${focus}`}>
-          <span className="grid size-7 place-items-center rounded-md bg-zinc-900 text-white">
+          <span className="grid size-7 place-items-center rounded-md bg-white text-black">
             <TrendingUp size={16} />
           </span>
           Sooth
@@ -73,30 +80,31 @@ export function Nav() {
                         type="button"
                         onClick={() => switchChain({ chainId: baseSepolia.id })}
                         disabled={isSwitchingChain}
-                        className={`flex items-center gap-2 whitespace-nowrap rounded-lg bg-amber-100 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${focus}`}
+                        className={`flex items-center gap-2 whitespace-nowrap rounded-full bg-amber-400/15 px-3 py-1.5 text-sm font-medium text-amber-300 hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${focus}`}
                       >
                         {isSwitchingChain ? <LoaderCircle size={15} className="animate-spin" /> : <TriangleAlert size={15} />}
                         {isSwitchingChain ? 'Switching…' : <>Switch<span className="hidden sm:inline"> to Base Sepolia</span></>}
                       </button>
                     )}
-                    <div className="flex items-center rounded-lg border border-zinc-200 bg-white text-sm font-medium">
+                    {/* One pill: balance is the headline, the address lives in the account sheet. */}
+                    <div className="flex items-center gap-1 rounded-full bg-raised p-1 text-sm font-semibold">
                       {!chain.unsupported && (
                         <Link
                           to="/portfolio"
-                          title="View portfolio"
-                          className={`hidden whitespace-nowrap rounded-l-lg border-r border-zinc-200 px-3 py-1.5 hover:bg-zinc-50 sm:block ${focus}`}
+                          title="USDC on Base Sepolia · view portfolio"
+                          className={`hidden whitespace-nowrap rounded-full py-1 pl-3 pr-2 tracking-tight hover:bg-white/10 sm:block ${focus}`}
                         >
-                          {wallet?.usdc == null ? <span className="text-zinc-400">— USDC</span> : `${usdc(wallet.usdc)} USDC`}
+                          {wallet?.usdc == null ? <span className="text-muted">$—</span> : `$${usdc(wallet.usdc)}`}
                         </Link>
                       )}
                       <button
                         type="button"
                         onClick={openAccountModal}
-                        title="Manage wallet"
-                        className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 hover:bg-zinc-50 ${press} ${focus}`}
-                      >
-                        <Wallet size={15} /> {account.displayName}
-                      </button>
+                        title={`${account.displayName} · manage wallet`}
+                        aria-label="Manage wallet"
+                        style={{ background: avatar(account.address) }}
+                        className={`size-7 rounded-full ring-1 ring-white/15 hover:ring-white/40 ${press} ${focus}`}
+                      />
                     </div>
                   </>
                 ) : (
@@ -104,7 +112,7 @@ export function Nav() {
                     type="button"
                     onClick={openConnectModal}
                     disabled={connecting}
-                    className={`flex items-center gap-2 whitespace-nowrap rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 ${press} ${focus}`}
+                    className={`flex items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted ${press} ${focus}`}
                   >
                     {connecting ? <LoaderCircle size={15} className="animate-spin" /> : <Wallet size={15} />}
                     {connecting ? 'Connecting…' : <>Connect<span className="hidden sm:inline"> wallet</span></>}
@@ -130,8 +138,8 @@ const categoryIcons: Record<Category, typeof Coins> = {
 export function CategoryLabel({ category }: { category: Category }) {
   const Icon = categoryIcons[category]
   return (
-    <span className="flex items-center gap-1.5 text-xs text-zinc-500">
-      <Icon size={14} /> {category}
+    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">
+      <Icon size={13} /> {category}
     </span>
   )
 }
@@ -139,7 +147,7 @@ export function CategoryLabel({ category }: { category: Category }) {
 export function StatusBadge({ market }: { market: Market }) {
   if (market.status === 'resolved')
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-zinc-900 px-2.5 py-0.5 text-xs font-medium text-white">
+      <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-black">
         <Check size={12} /> Resolved {market.resolvedOutcome}
       </span>
     )
@@ -168,14 +176,24 @@ export function PriceChart({ points, height = 160, axis = false }: { points: num
     <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }} aria-hidden>
       {axis &&
         [0.25, 0.5, 0.75].map((g) => (
-          <line key={g} x1={0} x2={w} y1={(1 - g) * height} y2={(1 - g) * height} className="stroke-zinc-200" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          <line key={g} x1={0} x2={w} y1={(1 - g) * height} y2={(1 - g) * height} className="stroke-line" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
         ))}
       <polyline points={xy} fill="none" className="stroke-yes" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
     </svg>
   )
 }
 
-// Neutral outline button; outcome colour only shows on hover / when selected.
+// YES share of the YES/NO split, like a scoreboard: who is ahead, at a glance.
+export function ProbabilityBar({ p }: { p: number }) {
+  return (
+    <div className="flex h-1.5 gap-0.5" aria-hidden>
+      <div className="rounded-full bg-yes" style={{ width: `${p * 100}%` }} />
+      <div className="flex-1 rounded-full bg-no" />
+    </div>
+  )
+}
+
+// Tinted by outcome so the action reads as a bet, solid when selected.
 export function OutcomeButton({
   outcome,
   price,
@@ -186,19 +204,20 @@ export function OutcomeButton({
   const tone =
     outcome === 'YES'
       ? selected
-        ? 'border-yes bg-yes-soft text-yes'
-        : 'hover:border-yes hover:bg-yes-soft hover:text-yes'
+        ? 'bg-yes text-black'
+        : 'bg-yes-soft text-yes hover:bg-yes/25'
       : selected
-        ? 'border-no bg-no-soft text-no'
-        : 'hover:border-no hover:bg-no-soft hover:text-no'
+        ? 'bg-no text-black'
+        : 'bg-no-soft text-no hover:bg-no/25'
   return (
     <button
       type="button"
       aria-pressed={selected}
       {...rest}
-      className={`flex flex-1 items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium ${press} ${focus} ${tone}`}
+      className={`flex flex-1 items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-semibold ${press} ${focus} ${tone}`}
     >
-      <span>{verb && `${verb} `}{outcome === 'YES' ? 'Yes' : 'No'}</span>
+      {/* The colour already says "buy"; the verb stays for screen readers. */}
+      <span>{verb && <span className="sr-only">{verb} </span>}{outcome === 'YES' ? 'Yes' : 'No'}</span>
       <span>{cents(price)}</span>
     </button>
   )
@@ -207,46 +226,47 @@ export function OutcomeButton({
 export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Outcome) => void }) {
   const p = priceYes(market)
   return (
-    <article className="relative flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 transition hover:border-zinc-300 hover:shadow-sm">
-      <CategoryLabel category={market.category} />
-      <h3 className="font-medium leading-snug">
-        <Link to={`/market/${market.id}`} className={`rounded after:absolute after:inset-0 after:rounded-2xl ${focus}`}>
+    <article className="relative flex flex-col gap-4 rounded-3xl bg-surface p-5 transition-colors hover:bg-[#232325]">
+      <div className="flex items-center justify-between">
+        <CategoryLabel category={market.category} />
+        <span className="text-xs text-muted">
+          {market.status === 'resolved' ? 'Closed' : 'Closes'} {date(market.closesAt)}
+        </span>
+      </div>
+      <h3 className="font-semibold leading-snug">
+        <Link to={`/market/${market.id}`} className={`rounded after:absolute after:inset-0 after:rounded-3xl ${focus}`}>
           {market.question}
         </Link>
       </h3>
-      <div className="mt-auto flex items-baseline gap-2">
-        {market.status === 'resolved' ? (
-          <div className="flex flex-col gap-1">
-            <span className="flex items-center gap-1.5 text-2xl font-semibold tracking-tight">
-              <Check size={22} className={market.resolvedOutcome === 'YES' ? 'text-yes' : 'text-no'} />
-              Resolved {market.resolvedOutcome === 'YES' ? 'Yes' : 'No'}
-            </span>
-            <span className="text-xs text-zinc-500">
-              Winning {market.resolvedOutcome === 'YES' ? 'Yes' : 'No'} shares paid 1 USDC each
-            </span>
-          </div>
-        ) : (
-          <>
-            <span className="text-2xl font-semibold tracking-tight">{pct(p)}</span>
-            <span className="text-sm text-zinc-500">Yes</span>
+      {market.status === 'resolved' ? (
+        <div className="mt-auto flex flex-col gap-1">
+          <span className="flex items-center gap-2 text-3xl font-extrabold tracking-tight">
+            <Check size={26} strokeWidth={3} className={market.resolvedOutcome === 'YES' ? 'text-yes' : 'text-no'} />
+            {market.resolvedOutcome === 'YES' ? 'Yes' : 'No'}
+          </span>
+          <span className="text-xs text-muted">
+            Resolved · winning shares paid 1 USDC each
+          </span>
+        </div>
+      ) : (
+        <div className="mt-auto flex flex-col gap-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[40px] font-extrabold leading-none tracking-tighter">{pct(p)}</span>
+            <span className="text-sm text-muted">chance</span>
             <span className="ml-auto">
               <Change value={change30d(market)} />
             </span>
-          </>
-        )}
-      </div>
+          </div>
+          <ProbabilityBar p={p} />
+        </div>
+      )}
       {market.status === 'open' && (
         <div className="relative z-10 flex gap-2">
           <OutcomeButton verb="Buy" outcome="YES" price={p} onClick={() => onPick('YES')} />
           <OutcomeButton verb="Buy" outcome="NO" price={1 - p} onClick={() => onPick('NO')} />
         </div>
       )}
-      <div className="flex justify-between text-xs text-zinc-500">
-        <span>
-          {market.status === 'resolved' ? 'Closed' : 'Closes'} {date(market.closesAt)}
-        </span>
-        <span>{compact(market.volume)} USDC vol</span>
-      </div>
+      <span className="text-xs text-muted">{compact(market.volume)} USDC vol</span>
     </article>
   )
 }
@@ -317,23 +337,23 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
 
   const row = (label: string, value: ReactNode, strong = false) => (
     <div className="flex justify-between text-sm">
-      <span className="text-zinc-500">{label}</span>
+      <span className="text-muted">{label}</span>
       <span className={strong ? 'font-semibold' : ''}>{value}</span>
     </div>
   )
   const quick = mode === 'Buy' ? [25, 50, 100] : [10, 50, 100]
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5">
+    <div className="flex flex-col gap-4 rounded-3xl bg-surface p-5">
       <h2 className="font-semibold">Trade</h2>
 
-      <div className="grid grid-cols-2 rounded-lg bg-zinc-100 p-1 text-sm">
+      <div className="grid grid-cols-2 rounded-xl bg-raised p-1 text-sm">
         {(['Buy', 'Sell'] as const).map((m) => (
           <button
             key={m}
             aria-pressed={mode === m}
             onClick={() => { setMode(m); setInput(''); setStep('idle') }}
-            className={`rounded-md py-1.5 ${focus} ${mode === m ? 'bg-white font-medium shadow-sm' : 'text-zinc-500'}`}
+            className={`rounded-lg py-1.5 ${focus} ${mode === m ? 'bg-[#636366] font-semibold' : 'text-muted'}`}
           >
             {m}
           </button>
@@ -346,11 +366,11 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex justify-between text-xs text-zinc-500">
+        <div className="flex justify-between text-xs text-muted">
           <label htmlFor="amount">{mode === 'Buy' ? 'Amount' : 'Shares to sell'}</label>
           {wallet && <span>{mode === 'Buy' ? `Balance ${wallet.usdc == null ? '—' : usdc(wallet.usdc)} USDC` : `You hold ${held} ${outcome}`}</span>}
         </div>
-        <div className={`flex items-center rounded-lg border border-zinc-200 px-3 focus-within:border-zinc-900`}>
+        <div className={`flex items-center rounded-xl bg-raised px-3 ring-white/30 focus-within:ring-1`}>
           <input
             id="amount"
             inputMode="decimal"
@@ -359,17 +379,17 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
             onChange={(e) => { if (/^\d*\.?\d{0,6}$/.test(e.target.value)) { setInput(e.target.value); setStep('idle') } }}
             className="w-full bg-transparent py-3 text-2xl font-semibold outline-none"
           />
-          <span className="text-sm text-zinc-500">{mode === 'Buy' ? 'USDC' : outcome}</span>
+          <span className="text-sm text-muted">{mode === 'Buy' ? 'USDC' : outcome}</span>
         </div>
         <div className="grid grid-cols-4 gap-2">
           {quick.map((q) => (
-            <button key={q} onClick={() => setInput(String(q))} className={`rounded-md bg-zinc-100 py-1.5 text-xs hover:bg-zinc-200 ${press} ${focus}`}>
+            <button key={q} onClick={() => setInput(String(q))} className={`rounded-lg bg-raised py-1.5 text-xs font-medium hover:bg-white/15 ${press} ${focus}`}>
               {mode === 'Buy' ? `$${q}` : q}
             </button>
           ))}
           <button
             onClick={() => setInput(String(mode === 'Buy' ? (wallet?.usdc ?? 0) : held))}
-            className={`rounded-md bg-zinc-100 py-1.5 text-xs hover:bg-zinc-200 ${press} ${focus}`}
+            className={`rounded-lg bg-raised py-1.5 text-xs font-medium hover:bg-white/15 ${press} ${focus}`}
           >
             Max
           </button>
@@ -377,11 +397,11 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
       </div>
 
       {amount > 0 && (
-        <div className="flex flex-col gap-2 border-t border-zinc-100 pt-4">
+        <div className="flex flex-col gap-2 border-t border-line pt-4">
           {row('Avg price', cents((buy ?? sell)!.avgPrice, 1))}
           {row(
             'Price impact',
-            <span className={impact > 0.05 ? 'font-medium text-amber-600' : ''}>{(impact * 100).toFixed(1)}%</span>,
+            <span className={impact > 0.05 ? 'font-medium text-amber-400' : ''}>{(impact * 100).toFixed(1)}%</span>,
           )}
           {buy && row('Est. shares', buy.shares.toFixed(1))}
           {buy && row(`Min received (${slippage * 100}% slippage)`, (buy.shares * (1 - slippage)).toFixed(1))}
@@ -389,7 +409,7 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
           {sell && row(`Min received (${slippage * 100}% slippage)`, `${usdc(sell.received * (1 - slippage))} USDC`)}
           {row(`Fee (${FEE * 100}%, included)`, `${usdc((buy ?? sell)!.fee)} USDC`)}
           {buy && row(`Payout if ${outcome} wins`, <span className="text-yes">{usdc(buy.shares)} USDC</span>, true)}
-          <div className="flex items-center justify-between text-xs text-zinc-500">
+          <div className="flex items-center justify-between text-xs text-muted">
             <span>Slippage tolerance</span>
             <div className="flex gap-1">
               {[0.005, 0.01, 0.02].map((s) => (
@@ -397,7 +417,7 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
                   key={s}
                   aria-pressed={slippage === s}
                   onClick={() => setSlippage(s)}
-                  className={`rounded px-1.5 py-0.5 ${focus} ${slippage === s ? 'bg-zinc-900 text-white' : 'bg-zinc-100'}`}
+                  className={`rounded px-1.5 py-0.5 ${focus} ${slippage === s ? 'bg-white text-black' : 'bg-raised'}`}
                 >
                   {s * 100}%
                 </button>
@@ -408,13 +428,13 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
       )}
 
       {mode === 'Buy' && wallet && !approved && amount > 0 && !busy && (
-        <p className="text-xs text-zinc-500">First trade needs two wallet confirmations: approve USDC once, then buy.</p>
+        <p className="text-xs text-muted">First trade needs two wallet confirmations: approve USDC once, then buy.</p>
       )}
 
       <button
         onClick={action.onClick}
         disabled={action.disabled}
-        className={`flex items-center justify-center gap-2 rounded-lg bg-zinc-900 py-3 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 ${press} ${focus}`}
+        className={`flex items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted ${press} ${focus}`}
       >
         {action.label}
       </button>
@@ -428,7 +448,7 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
         </p>
       )}
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted">
         Winning shares redeem for 1 USDC each, losing shares for 0. Estimates can change before your wallet confirms.
       </p>
     </div>

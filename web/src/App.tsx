@@ -17,10 +17,10 @@ export default function App() {
           <Route path="*" element={<p className="text-zinc-500">Page not found.</p>} />
         </Routes>
       </main>
-      <footer className="mx-auto flex max-w-6xl justify-between px-4 pb-8 text-xs text-zinc-400">
-        <span>Illustrative markets · Testnet USDC · Not investment advice</span>
-        <span>Base Sepolia</span>
-      </footer>
+      {/* <footer className="mx-auto flex max-w-6xl justify-between px-4 pb-8 text-xs text-zinc-400"> */}
+      {/*   <span>Illustrative markets · Testnet USDC · Not investment advice</span> */}
+        {/* <span>Base Sepolia</span> */}
+      {/* </footer> */}
     </WalletProvider>
   )
 }
