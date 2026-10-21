@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -26,19 +27,29 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 
     IOutcomeToken public immutable outcomeToken;
     IERC20 public immutable collateral;
+    address public immutable feeBeneficiary;
 
     uint256 public marketCount;
     mapping(uint256 marketId => address market) public markets;
 
-    constructor(address admin, address collateral_) {
-        if (admin == address(0) || collateral_ == address(0)) revert InvalidConfig();
+    constructor(address admin, address collateral_, address feeBeneficiary_) {
+        if (admin == address(0) || collateral_ == address(0) || feeBeneficiary_ == address(0)) {
+            revert InvalidConfig();
+        }
+
+        try IERC20Metadata(collateral_).decimals() returns (uint8 decimals_) {
+            if (decimals_ != 6) revert InvalidCollateralDecimals(decimals_);
+        } catch {
+            revert InvalidConfig();
+        }
 
         collateral = IERC20(collateral_);
+        feeBeneficiary = feeBeneficiary_;
 
         OutcomeToken token = new OutcomeToken(address(this));
         outcomeToken = token;
 
-        implementation = address(new Market(address(this), token));
+        implementation = address(new Market(address(this), token, feeBeneficiary_));
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }

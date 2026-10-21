@@ -25,13 +25,14 @@ contract MarketFactoryTest is Test {
     IOutcomeToken token;
 
     address admin = makeAddr("admin");
+    address treasury = makeAddr("treasury");
     address arbitrator = makeAddr("arbitrator");
     address alice = makeAddr("alice");
 
     function setUp() public {
         vm.warp(1_760_000_000);
         usdc = new MockUSDC();
-        factory = new MarketFactory(admin, address(usdc));
+        factory = new MarketFactory(admin, address(usdc), treasury);
         token = factory.outcomeToken();
 
         usdc.mint(admin, 1_000_000e6);
@@ -87,6 +88,8 @@ contract MarketFactoryTest is Test {
 
         assertEq(factory.markets(id), address(m));
         assertEq(address(factory.collateral()), address(usdc));
+        assertEq(factory.feeBeneficiary(), treasury);
+        assertEq(token.SHARE_DECIMALS(), 6);
         assertEq(factory.MIN_LIQUIDITY(), MIN_LIQUIDITY);
     }
 
@@ -96,15 +99,7 @@ contract MarketFactoryTest is Test {
 
         vm.expectEmit(true, true, true, true, address(factory));
         emit IMarketFactory.MarketCreated(
-            1,
-            predicted,
-            admin,
-            arbitrator,
-            address(usdc),
-            p.closeTime,
-            SPEC_HASH,
-            SPEC_CID,
-            LIQUIDITY
+            1, predicted, admin, arbitrator, address(usdc), p.closeTime, SPEC_HASH, SPEC_CID, LIQUIDITY
         );
         (, Market m) = _create(p);
         assertEq(address(m), predicted);
@@ -261,10 +256,13 @@ contract MarketFactoryTest is Test {
 
     function test_RevertWhen_FactoryConfigInvalid() public {
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(address(0), address(usdc));
+        new MarketFactory(address(0), address(usdc), treasury);
 
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(admin, address(0));
+        new MarketFactory(admin, address(0), treasury);
+
+        vm.expectRevert(IMarketFactory.InvalidConfig.selector);
+        new MarketFactory(admin, address(usdc), address(0));
     }
 
     // ---------------------------------------------------------------
@@ -378,6 +376,21 @@ contract MarketFactoryTest is Test {
         vm.prank(address(m1));
         vm.expectRevert(abi.encodeWithSelector(IOutcomeToken.NotMarketForToken.selector, address(m1), ids[1]));
         token.mintBatch(address(m1), ids, amounts);
+    }
+
+    function test_RevertWhen_BurnBatchIncludesAnotherMarketsToken() public {
+        (, Market m1) = _create(_params());
+        (, Market m2) = _create(_params());
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = m1.yesTokenId();
+        ids[1] = m2.noTokenId();
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 1;
+        amounts[1] = 1;
+
+        vm.prank(address(m1));
+        vm.expectRevert(abi.encodeWithSelector(IOutcomeToken.NotMarketForToken.selector, address(m1), ids[1]));
+        token.burnBatch(address(m1), ids, amounts);
     }
 
     function test_RevertWhen_MarketRegisteredTwice() public {

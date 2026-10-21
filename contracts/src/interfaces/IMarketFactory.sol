@@ -36,6 +36,7 @@ interface IMarketFactory {
     );
 
     error InvalidConfig();
+    error InvalidCollateralDecimals(uint8 decimals);
     error ZeroArbitrator();
     error CloseTimeInPast(uint64 closeTime, uint256 currentTime);
     error UnsupportedInitialProbability(uint16 initialYesProbabilityBps);
@@ -53,4 +54,5 @@ interface IMarketFactory {
     function MIN_LIQUIDITY() external view returns (uint256);
     function marketCount() external view returns (uint256);
     function markets(uint256 marketId) external view returns (address);
+    function feeBeneficiary() external view returns (address);
 }

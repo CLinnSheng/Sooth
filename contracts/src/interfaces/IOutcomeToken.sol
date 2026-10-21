@@ -7,6 +7,9 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 /// @notice Shared ERC-1155 holding the YES/NO tokens of every market. Token IDs are
 ///         keccak256(abi.encode(marketId, outcome)) (see OutcomeTokenId).
 interface IOutcomeToken is IERC1155 {
+    /// @notice Application convention only: ERC-1155 has no standard decimals property.
+    ///         Outcome token amounts use the same six raw decimal places as USDC collateral.
+    function SHARE_DECIMALS() external view returns (uint8);
     error NotFactory(address caller);
     error NotMarketForToken(address caller, uint256 id);
     error MarketAlreadyRegistered(uint256 marketId);
@@ -24,6 +27,9 @@ interface IOutcomeToken is IERC1155 {
 
     /// @notice Only the market that owns `id` can burn it.
     function burn(address from, uint256 id, uint256 amount) external;
+
+    /// @notice Burns several token IDs. Every ID must belong to the calling market.
+    function burnBatch(address from, uint256[] calldata ids, uint256[] calldata amounts) external;
 
     function factory() external view returns (address);
     function marketOf(uint256 id) external view returns (address);

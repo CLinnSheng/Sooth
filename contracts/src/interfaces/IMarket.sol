@@ -35,6 +35,12 @@ interface IMarket {
 
     error NotFactory(address caller);
     error CollateralNotReceived(uint256 expected, uint256 actual);
+    error InitialInventoryMismatch(uint256 yesBalance, uint256 noBalance, uint256 expected);
+    error TradingClosed(State currentState);
+    error ZeroAmount();
+    error ZeroOutput();
+    error DeadlineExpired(uint256 deadline, uint256 currentTime);
+    error InsufficientOutput(uint256 actual, uint256 minimum);
 
     /// @notice Called once, only by the factory, right after cloning. Mints the seed YES/NO
     ///         pairs into the pool; the factory must have transferred `initialLiquidity` first.
@@ -48,6 +54,18 @@ interface IMarket {
 
     /// @notice Implied probability of NO, 18 decimals: yesPool / (yesPool + noPool).
     function priceNo() external view returns (uint256);
+
+    function quoteBuy(Outcome outcome, uint256 collateralIn) external view returns (uint256 sharesOut, uint256 fee);
+
+    function quoteSell(Outcome outcome, uint256 sharesIn) external view returns (uint256 collateralOut, uint256 fee);
+
+    function buy(Outcome outcome, uint256 collateralIn, uint256 minSharesOut, uint256 deadline)
+        external
+        returns (uint256 sharesOut);
+
+    function sell(Outcome outcome, uint256 sharesIn, uint256 minCollateralOut, uint256 deadline)
+        external
+        returns (uint256 collateralOut);
 
     function factory() external view returns (address);
     function marketId() external view returns (uint256);
@@ -65,4 +83,9 @@ interface IMarket {
     function noTokenId() external view returns (uint256);
     function yesPool() external view returns (uint256);
     function noPool() external view returns (uint256);
+    function accruedFees() external view returns (uint256);
+    function feeBeneficiary() external view returns (address);
+
+    event Bought(address indexed trader, Outcome indexed outcome, uint256 collateralIn, uint256 sharesOut, uint256 fee);
+    event Sold(address indexed trader, Outcome indexed outcome, uint256 sharesIn, uint256 collateralOut, uint256 fee);
 }
