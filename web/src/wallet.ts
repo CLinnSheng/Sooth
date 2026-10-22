@@ -4,10 +4,11 @@ import { erc20Abi, formatUnits, zeroAddress, type Address } from 'viem'
 import { useAccount, useDisconnect, useReadContract } from 'wagmi'
 import { baseSepolia } from 'wagmi/chains'
 
-const BASE_SEPOLIA_USDC: Address = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+// Sooth's MockUSDC (mUSDC, 6 decimals), the collateral for every market.
+const BASE_SEPOLIA_USDC: Address = '0x5f29331BBBA6f605942f5de0B217359F3C7B7c51'
 
 export type WalletState = {
-  // usdc is the wallet's Circle USDC balance on Base Sepolia; null while loading,
+  // usdc is the wallet's mUSDC balance on Base Sepolia; null while loading,
   // on a read error, or when the wallet is on another network.
   wallet: { address: string; usdc: number | null } | null
   connect: () => void
