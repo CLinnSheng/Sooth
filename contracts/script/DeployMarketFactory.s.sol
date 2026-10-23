@@ -6,8 +6,8 @@ import {MarketFactory} from "../src/MarketFactory.sol";
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 
 /// @notice Deploys MarketFactory, plus MockUSDC when COLLATERAL is not set (test chains only).
-/// @dev Env vars: COLLATERAL (default: deploy MockUSDC), ADMIN (default: broadcasting wallet),
-///      FEE_BENEFICIARY (required: protocol treasury address).
+/// @dev Env vars: COLLATERAL (default: deploy MockUSDC), ADMIN (default: broadcasting wallet).
+///      Each market's creating wallet receives its accrued fees after trading closes.
 ///
 ///      Local: anvil, then
 ///        forge script script/DeployMarketFactory.s.sol --rpc-url http://127.0.0.1:8545 \
@@ -21,16 +21,14 @@ contract DeployMarketFactory is Script {
 
         vm.startBroadcast();
         address admin = vm.envOr("ADMIN", msg.sender);
-        address feeBeneficiary = vm.envAddress("FEE_BENEFICIARY");
         // Without a wallet, forge falls back to a default sender nobody controls.
         require(admin != DEFAULT_SENDER, "No deployer wallet: pass --private-key / --account, or set ADMIN");
 
         if (collateral == address(0)) collateral = address(new MockUSDC());
-        factory = new MarketFactory(admin, collateral, feeBeneficiary);
+        factory = new MarketFactory(admin, collateral);
         vm.stopBroadcast();
 
         console.log("Admin:        ", admin);
-        console.log("Fee treasury: ", feeBeneficiary);
         console.log("Collateral:   ", collateral);
         console.log("MarketFactory:", address(factory));
         console.log("OutcomeToken: ", address(factory.outcomeToken()));

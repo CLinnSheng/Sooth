@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {Market} from "../src/Market.sol";
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
@@ -17,6 +18,29 @@ contract WrongDecimalsToken is ERC20 {
 
     function decimals() public pure override returns (uint8) {
         return 18;
+    }
+}
+
+contract FeeCallbackToken is MockUSDC {
+    Market public callbackMarket;
+    bytes4 public callbackError;
+
+    function setCallbackMarket(Market target) external {
+        callbackMarket = target;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        bool success = super.transfer(to, amount);
+        if (address(callbackMarket) != address(0)) {
+            try callbackMarket.withdrawFees() returns (uint256) {
+                revert("Reentry succeeded");
+            } catch (bytes memory reason) {
+                // Intentionally extract only the four-byte custom-error selector.
+                // forge-lint: disable-next-line(unsafe-typecast)
+                callbackError = bytes4(reason);
+            }
+        }
+        return success;
     }
 }
 
@@ -69,20 +93,22 @@ contract MarketTradingTest is Test {
     MarketFactory private factory;
     address private admin = makeAddr("admin");
     address private alice = makeAddr("alice");
-    address private treasury = makeAddr("treasury");
     address private arbitrator = makeAddr("arbitrator");
 
     function setUp() public {
         vm.warp(1_760_000_000);
         usdc = new MockUSDC();
-        factory = new MarketFactory(admin, address(usdc), treasury);
+        factory = new MarketFactory(admin, address(usdc));
         token = factory.outcomeToken();
         usdc.mint(admin, 1_000e6);
-        vm.prank(admin);
-        usdc.approve(address(factory), type(uint256).max);
+        market = _createMarket(factory, admin);
+        usdc.mint(alice, 1_000e6);
+    }
 
-        vm.prank(admin);
-        (, address marketAddress) = factory.createMarket(
+    function _createMarket(MarketFactory factory_, address owner) private returns (Market) {
+        vm.startPrank(owner);
+        factory_.collateral().approve(address(factory_), type(uint256).max);
+        (, address marketAddress) = factory_.createMarket(
             IMarketFactory.CreateParams({
                 arbitrator: arbitrator,
                 closeTime: uint64(block.timestamp + 7 days),
@@ -92,8 +118,8 @@ contract MarketTradingTest is Test {
                 initialLiquidity: LIQUIDITY
             })
         );
-        market = Market(marketAddress);
-        usdc.mint(alice, 1_000e6);
+        vm.stopPrank();
+        return Market(marketAddress);
     }
 
     function _buy(IMarket.Outcome outcome, uint256 amount) private returns (uint256 shares) {
@@ -112,8 +138,7 @@ contract MarketTradingTest is Test {
 
     function test_InitialSeedIsEqualNonzeroInventoryAndUsesSixDecimals() public view {
         assertEq(usdc.decimals(), 6);
-        assertEq(token.SHARE_DECIMALS(), 6);
-        assertEq(market.feeBeneficiary(), treasury);
+        assertEq(market.creator(), admin);
         _assertInventoryMatchesReserves();
         assertEq(market.yesPool(), LIQUIDITY);
         assertEq(market.noPool(), LIQUIDITY);
@@ -122,7 +147,7 @@ contract MarketTradingTest is Test {
     function test_FactoryRejectsCollateralWithWrongDecimals() public {
         WrongDecimalsToken wrong = new WrongDecimalsToken();
         vm.expectRevert(abi.encodeWithSelector(IMarketFactory.InvalidCollateralDecimals.selector, uint8(18)));
-        new MarketFactory(admin, address(wrong), treasury);
+        new MarketFactory(admin, address(wrong));
     }
 
     function test_MarketCloneAdvertisesReceiverInterface() public view {
@@ -320,6 +345,107 @@ contract MarketTradingTest is Test {
         assertEq(market.noPool(), noReserve);
         assertGt(token.balanceOf(address(market), market.yesTokenId()), market.yesPool());
         assertGt(usdc.balanceOf(address(market)) - market.accruedFees(), token.totalSupply(market.yesTokenId()));
+    }
+
+    function test_WithdrawFeesAtClosePaysOnlyCreatorAndPreservesBacking() public {
+        uint256 shares = _buy(IMarket.Outcome.Yes, TRADE);
+        vm.startPrank(alice);
+        token.setApprovalForAll(address(market), true);
+        market.sell(IMarket.Outcome.Yes, shares / 2, 1, block.timestamp);
+        vm.stopPrank();
+        usdc.mint(address(market), 3e6);
+
+        uint256 fees = market.accruedFees();
+        uint256 balanceBefore = usdc.balanceOf(address(market));
+        uint256 creatorBefore = usdc.balanceOf(admin);
+        uint256 callerBefore = usdc.balanceOf(alice);
+        uint256 yesBefore = market.yesPool();
+        uint256 noBefore = market.noPool();
+        vm.warp(market.closeTime());
+
+        vm.expectEmit(true, false, false, true, address(market));
+        emit IMarket.FeesWithdrawn(admin, fees);
+        vm.prank(alice);
+        uint256 withdrawn = market.withdrawFees();
+
+        assertEq(withdrawn, fees);
+        assertEq(market.accruedFees(), 0);
+        assertEq(usdc.balanceOf(admin), creatorBefore + fees);
+        assertEq(usdc.balanceOf(alice), callerBefore);
+        assertEq(usdc.balanceOf(address(market)), balanceBefore - fees);
+        assertEq(market.yesPool(), yesBefore);
+        assertEq(market.noPool(), noBefore);
+        assertGe(usdc.balanceOf(address(market)), token.totalSupply(market.yesTokenId()));
+        assertGe(usdc.balanceOf(address(market)), token.totalSupply(market.noTokenId()));
+        _assertInventoryMatchesReserves();
+
+        vm.expectRevert(IMarket.NoFeesToWithdraw.selector);
+        market.withdrawFees();
+    }
+
+    function test_RevertWhen_WithdrawingFeesBeforeClose() public {
+        _buy(IMarket.Outcome.No, TRADE);
+        vm.warp(market.closeTime() - 1);
+        vm.expectRevert(IMarket.TradingStillOpen.selector);
+        market.withdrawFees();
+        assertEq(market.accruedFees(), 100_000);
+    }
+
+    function test_RevertWhen_NoAccruedFeesAfterClose() public {
+        vm.warp(market.closeTime());
+        vm.expectRevert(IMarket.NoFeesToWithdraw.selector);
+        market.withdrawFees();
+        assertEq(usdc.balanceOf(address(market)), LIQUIDITY);
+    }
+
+    function test_WithdrawFeesUsesEachMarketsCreator() public {
+        bytes32 adminRole = factory.DEFAULT_ADMIN_ROLE();
+        vm.prank(admin);
+        factory.grantRole(adminRole, alice);
+        Market second = _createMarket(factory, alice);
+        vm.startPrank(admin);
+        usdc.approve(address(second), TRADE);
+        second.buy(IMarket.Outcome.No, TRADE, 1, block.timestamp);
+        vm.stopPrank();
+        uint256 creatorBefore = usdc.balanceOf(alice);
+        uint256 fees = second.accruedFees();
+        vm.warp(second.closeTime());
+        second.withdrawFees();
+        assertEq(second.creator(), alice);
+        assertEq(usdc.balanceOf(alice), creatorBefore + fees);
+        assertEq(usdc.balanceOf(address(market)), LIQUIDITY);
+    }
+
+    function test_FailedFeeTransferRestoresAccruedFees() public {
+        _buy(IMarket.Outcome.Yes, TRADE);
+        uint256 fees = market.accruedFees();
+        uint256 balanceBefore = usdc.balanceOf(address(market));
+        vm.warp(market.closeTime());
+        vm.mockCallRevert(address(usdc), abi.encodeCall(IERC20.transfer, (admin, fees)), bytes("blocked"));
+        vm.expectRevert(bytes("blocked"));
+        market.withdrawFees();
+        assertEq(market.accruedFees(), fees);
+        assertEq(usdc.balanceOf(address(market)), balanceBefore);
+        vm.clearMockedCalls();
+        assertEq(market.withdrawFees(), fees);
+    }
+
+    function test_FeeTransferCallbackCannotReenterWithdrawal() public {
+        FeeCallbackToken callbackToken = new FeeCallbackToken();
+        MarketFactory callbackFactory = new MarketFactory(admin, address(callbackToken));
+        callbackToken.mint(admin, LIQUIDITY);
+        Market callbackMarket = _createMarket(callbackFactory, admin);
+        callbackToken.mint(alice, TRADE);
+        vm.startPrank(alice);
+        callbackToken.approve(address(callbackMarket), TRADE);
+        callbackMarket.buy(IMarket.Outcome.Yes, TRADE, 1, block.timestamp);
+        vm.stopPrank();
+        callbackToken.setCallbackMarket(callbackMarket);
+        vm.warp(callbackMarket.closeTime());
+        callbackMarket.withdrawFees();
+        assertEq(callbackToken.callbackError(), ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
+        assertEq(callbackMarket.accruedFees(), 0);
+        assertEq(callbackToken.balanceOf(admin), 100_000);
     }
 
     function testFuzz_BuyThenSellCannotProfit(uint96 rawAmount) public {

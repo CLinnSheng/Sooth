@@ -106,7 +106,7 @@ One YES slip and one NO slip together are worth exactly 1 USDC, because one of t
 
 ### What is not built yet
 
-Markets support constant-product YES/NO trading with 1% fees accrued for the protocol treasury. Resolution, redemption, liquidity withdrawal, and fee withdrawal are not implemented yet. Use test collateral until the full lifecycle exists.
+Markets support constant-product YES/NO trading with 1% fees accrued for the platform wallet recorded as creator. After trading closes, anyone can call `withdrawFees()` to pay the creator. Resolution, redemption, and liquidity withdrawal are not implemented yet. Use test collateral until the full lifecycle exists.
 
 ---
 
@@ -192,7 +192,7 @@ struct CreateParams {
 
 There is no `collateral` field: every market uses the single token (USDC) fixed in the factory at deployment.
 
-There is no fee or resolution deadline input. Every trade pays a flat 1% (`Market.FEE_BPS = 100`), accrued for the protocol treasury set at factory deployment. The resolution deadline is `closeTime + 7 days` (`Market.RESOLUTION_WINDOW`); resolution and redemption behavior is not implemented yet.
+There is no fee or resolution deadline input. Every trade pays a flat 1% (`Market.FEE_BPS = 100`), accrued for the market creator and withdrawable after trading closes. The resolution deadline is `closeTime + 7 days` (`Market.RESOLUTION_WINDOW`); resolution and redemption behavior is not implemented yet.
 
 `uint64` and `uint16` are smaller number types. They're big enough for timestamps and percentages, and the compiler can pack them together to save storage.
 
@@ -417,18 +417,18 @@ mapping(address => bool) public isMarket;     // is this address one of our mark
 #### Constructor
 
 ```solidity
-constructor(address admin, uint256 minLiquidity_, address collateral_) {
-    if (admin == address(0) || collateral_ == address(0) || minLiquidity_ == 0) revert InvalidConfig();
+constructor(address admin, address collateral_) {
+    if (admin == address(0) || collateral_ == address(0)) revert InvalidConfig();
     collateral = IERC20(collateral_);
     ...
     OutcomeToken token = new OutcomeToken(address(this));
     outcomeToken = token;
-    implementation = address(new Market(address(this), token, feeBeneficiary));
+    implementation = address(new Market(address(this), token));
     _grantRole(DEFAULT_ADMIN_ROLE, admin);
 }
 ```
 
-- `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token, feeBeneficiary)` deploys the implementation and fixes its treasury. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
+- `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token)` deploys the implementation with its factory and outcome-token addresses. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
 - Zero minimums are rejected, because a market that closes instantly or has an empty pool makes no sense. This also lets `_validate` use simpler checks.
 - The collateral token is fixed forever. Only USDC is supported, so there is no whitelist to manage; supporting another token means deploying a new factory.
 - `DEFAULT_ADMIN_ROLE` can create markets and grant or revoke the role for other admins.
@@ -502,8 +502,7 @@ Foundry tests are written in Solidity. Every function starting with `test` is ru
 function setUp() public {
     vm.warp(1_760_000_000);                   // set the blockchain clock to a fixed time
     usdc = new MockUSDC();
-    address treasury = makeAddr("treasury");
-    factory = new MarketFactory(admin, address(usdc), treasury);
+    factory = new MarketFactory(admin, address(usdc));
     usdc.mint(admin, 1_000_000e6);            // give the admin 1M fake USDC
     vm.prank(admin);
     usdc.approve(address(factory), type(uint256).max);  // admin allows the factory to take USDC
@@ -558,8 +557,7 @@ vm.startBroadcast();
 address admin = vm.envOr("ADMIN", msg.sender);
 require(admin != DEFAULT_SENDER, "No deployer wallet: ...");
 if (collateral == address(0)) collateral = address(new MockUSDC());
-    address feeBeneficiary = vm.envAddress("FEE_BENEFICIARY");
-    factory = new MarketFactory(admin, collateral, feeBeneficiary);
+factory = new MarketFactory(admin, collateral);
 vm.stopBroadcast();
 ```
 
@@ -573,13 +571,12 @@ vm.stopBroadcast();
 |---|---|---|
 | `COLLATERAL` | deploy new MockUSDC (test chains only) | Existing collateral token address. Required on other chains |
 | `ADMIN` | the deploying wallet | Who gets the admin role (can create markets) |
-| `FEE_BENEFICIARY` | required | Protocol treasury that owns accrued trading fees |
 
 To try it locally:
 
 ```sh
 anvil                                   # terminal 1: local blockchain
-FEE_BENEFICIARY=0xYourTreasuryAddress forge script script/DeployMarketFactory.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --private-key <one of anvil's printed keys>
+forge script script/DeployMarketFactory.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --private-key <one of anvil's printed keys>
 ```
 
 ---
@@ -673,6 +670,6 @@ Together these cut market creation gas by about 92k (−13.6%).
 
 | Issue | Why |
 |---|---|
-| Seed liquidity has no withdrawal path yet | Resolution, redemption, liquidity withdrawal, and fee withdrawal are not implemented yet |
+| Seed liquidity has no withdrawal path yet | Resolution, redemption, and liquidity withdrawal are not implemented yet; accrued trading fees can be withdrawn to the creator after close |
 | Balance check is `>=`, so tokens sent to the address early are counted | Using `==` would let anyone block creation by sending 1 unit to the predictable next market address. With `>=`, a stray donation only strands the donor's own money |
 | `OutcomeToken` stores the owner for both the YES and NO IDs (2 writes) | Removing it saves about 22k gas but needs an awkward mint signature, because a hashed token ID can't be turned back into a market ID |

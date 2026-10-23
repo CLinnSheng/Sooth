@@ -6,10 +6,8 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 /// @title IOutcomeToken
 /// @notice Shared ERC-1155 holding the YES/NO tokens of every market. Token IDs are
 ///         keccak256(abi.encode(marketId, outcome)) (see OutcomeTokenId).
+/// @dev Shares use the collateral's raw units: 1e6 units is one whole share with six-decimal collateral.
 interface IOutcomeToken is IERC1155 {
-    /// @notice Application convention only: ERC-1155 has no standard decimals property.
-    ///         Outcome token amounts use the same six raw decimal places as USDC collateral.
-    function SHARE_DECIMALS() external view returns (uint8);
     error NotFactory(address caller);
     error NotMarketForToken(address caller, uint256 id);
     error MarketAlreadyRegistered(uint256 marketId);

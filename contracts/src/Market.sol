@@ -21,7 +21,6 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuard, IMarket {
     ///      all clones share these values without paying for storage writes.
     address public immutable factory;
     IOutcomeToken public immutable outcomeToken;
-    address public immutable feeBeneficiary;
 
     /// @dev Flat 1% fee on every trade, the same for all markets.
     uint16 public constant FEE_BPS = 100;
@@ -38,15 +37,15 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuard, IMarket {
     /// @dev AMM reserves of YES and NO tokens held by this contract.
     uint256 public yesPool;
     uint256 public noPool;
+    /// @notice Collateral fees owed to creator, excluded from the backing used to mint shares.
     uint256 public accruedFees;
 
     State internal _state;
 
     /// @dev Also locks the implementation so nobody can initialize (and take over) it directly.
-    constructor(address factory_, IOutcomeToken outcomeToken_, address feeBeneficiary_) {
+    constructor(address factory_, IOutcomeToken outcomeToken_) {
         factory = factory_;
         outcomeToken = outcomeToken_;
-        feeBeneficiary = feeBeneficiary_;
         _disableInitializers();
     }
 
@@ -72,12 +71,7 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuard, IMarket {
         yesPool = p.initialLiquidity;
         noPool = p.initialLiquidity;
 
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = yesTokenId();
-        ids[1] = noTokenId();
-        uint256[] memory amounts = new uint256[](2);
-        amounts[0] = p.initialLiquidity;
-        amounts[1] = p.initialLiquidity;
+        (uint256[] memory ids, uint256[] memory amounts) = _pair(p.initialLiquidity);
         outcomeToken.mintBatch(address(this), ids, amounts);
 
         uint256 yesBalance = outcomeToken.balanceOf(address(this), ids[0]);
@@ -136,17 +130,16 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuard, IMarket {
             revert CollateralNotReceived(collateralIn, collateral.balanceOf(address(this)) - beforeBalance);
         }
 
-        (uint256 yesAfter, uint256 noAfter) = _reservesAfterBuy(outcome, net, sharesOut);
-        yesPool = yesAfter;
-        noPool = noAfter;
+        if (outcome == Outcome.Yes) {
+            yesPool = yesPool + net - sharesOut;
+            noPool += net;
+        } else {
+            yesPool += net;
+            noPool = noPool + net - sharesOut;
+        }
         accruedFees += fee;
 
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = yesTokenId();
-        ids[1] = noTokenId();
-        uint256[] memory amounts = new uint256[](2);
-        amounts[0] = net;
-        amounts[1] = net;
+        (uint256[] memory ids, uint256[] memory amounts) = _pair(net);
         outcomeToken.mintBatch(address(this), ids, amounts);
         outcomeToken.safeTransferFrom(address(this), msg.sender, _tokenId(outcome), sharesOut, "");
     }
@@ -162,23 +155,32 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuard, IMarket {
         if (collateralOut < minCollateralOut) revert InsufficientOutput(collateralOut, minCollateralOut);
 
         uint256 gross = collateralOut + fee;
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = yesTokenId();
-        ids[1] = noTokenId();
-        uint256[] memory amounts = new uint256[](2);
-        amounts[0] = gross;
-        amounts[1] = gross;
+        (uint256[] memory ids, uint256[] memory amounts) = _pair(gross);
 
         outcomeToken.safeTransferFrom(msg.sender, address(this), _tokenId(outcome), sharesIn, "");
         outcomeToken.burnBatch(address(this), ids, amounts);
 
-        (uint256 yesAfter, uint256 noAfter) = _reservesAfterSell(outcome, sharesIn, gross);
-        yesPool = yesAfter;
-        noPool = noAfter;
+        if (outcome == Outcome.Yes) {
+            yesPool = yesPool + sharesIn - gross;
+            noPool -= gross;
+        } else {
+            yesPool -= gross;
+            noPool = noPool + sharesIn - gross;
+        }
         accruedFees += fee;
         collateral.safeTransfer(msg.sender, collateralOut);
 
         emit Sold(msg.sender, outcome, sharesIn, collateralOut, fee);
+    }
+
+    function withdrawFees() external nonReentrant returns (uint256 amount) {
+        if (state() == State.Open) revert TradingStillOpen();
+        amount = accruedFees;
+        if (amount == 0) revert NoFeesToWithdraw();
+
+        accruedFees = 0;
+        collateral.safeTransfer(creator, amount);
+        emit FeesWithdrawn(creator, amount);
     }
 
     function _quoteBuy(Outcome outcome, uint256 collateralIn) internal view returns (uint256 sharesOut, uint256 fee) {
@@ -222,22 +224,14 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuard, IMarket {
         return outcome == Outcome.Yes ? yesTokenId() : noTokenId();
     }
 
-    function _reservesAfterBuy(Outcome outcome, uint256 net, uint256 sharesOut)
-        internal
-        view
-        returns (uint256 yesAfter, uint256 noAfter)
-    {
-        if (outcome == Outcome.Yes) return (yesPool + net - sharesOut, noPool + net);
-        return (yesPool + net, noPool + net - sharesOut);
-    }
-
-    function _reservesAfterSell(Outcome outcome, uint256 sharesIn, uint256 gross)
-        internal
-        view
-        returns (uint256 yesAfter, uint256 noAfter)
-    {
-        if (outcome == Outcome.Yes) return (yesPool + sharesIn - gross, noPool - gross);
-        return (yesPool - gross, noPool + sharesIn - gross);
+    /// @dev YES always precedes NO; both sides use the collateral's raw units.
+    function _pair(uint256 amount) internal view returns (uint256[] memory ids, uint256[] memory amounts) {
+        ids = new uint256[](2);
+        ids[0] = yesTokenId();
+        ids[1] = noTokenId();
+        amounts = new uint256[](2);
+        amounts[0] = amount;
+        amounts[1] = amount;
     }
 
     function _checkTrade(uint256 deadline) internal view {

@@ -11,7 +11,6 @@ import {OutcomeTokenId} from "./libraries/OutcomeTokenId.sol";
 /// @notice One ERC-1155 for all markets. Each token ID can only be minted or burned by the
 ///         market it was registered to, so one market can never touch another market's tokens.
 contract OutcomeToken is ERC1155Supply, IOutcomeToken {
-    uint8 public constant SHARE_DECIMALS = 6;
     address public immutable factory;
 
     mapping(uint256 id => address market) public marketOf;

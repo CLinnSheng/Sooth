@@ -27,29 +27,24 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 
     IOutcomeToken public immutable outcomeToken;
     IERC20 public immutable collateral;
-    address public immutable feeBeneficiary;
 
     uint256 public marketCount;
     mapping(uint256 marketId => address market) public markets;
 
-    constructor(address admin, address collateral_, address feeBeneficiary_) {
-        if (admin == address(0) || collateral_ == address(0) || feeBeneficiary_ == address(0)) {
+    constructor(address admin, address collateral_) {
+        if (admin == address(0) || collateral_ == address(0)) {
             revert InvalidConfig();
         }
 
-        try IERC20Metadata(collateral_).decimals() returns (uint8 decimals_) {
-            if (decimals_ != 6) revert InvalidCollateralDecimals(decimals_);
-        } catch {
-            revert InvalidConfig();
-        }
+        uint8 decimals_ = IERC20Metadata(collateral_).decimals();
+        if (decimals_ != 6) revert InvalidCollateralDecimals(decimals_);
 
         collateral = IERC20(collateral_);
-        feeBeneficiary = feeBeneficiary_;
 
         OutcomeToken token = new OutcomeToken(address(this));
         outcomeToken = token;
 
-        implementation = address(new Market(address(this), token, feeBeneficiary_));
+        implementation = address(new Market(address(this), token));
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }

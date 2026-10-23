@@ -25,14 +25,13 @@ contract MarketFactoryTest is Test {
     IOutcomeToken token;
 
     address admin = makeAddr("admin");
-    address treasury = makeAddr("treasury");
     address arbitrator = makeAddr("arbitrator");
     address alice = makeAddr("alice");
 
     function setUp() public {
         vm.warp(1_760_000_000);
         usdc = new MockUSDC();
-        factory = new MarketFactory(admin, address(usdc), treasury);
+        factory = new MarketFactory(admin, address(usdc));
         token = factory.outcomeToken();
 
         usdc.mint(admin, 1_000_000e6);
@@ -88,8 +87,6 @@ contract MarketFactoryTest is Test {
 
         assertEq(factory.markets(id), address(m));
         assertEq(address(factory.collateral()), address(usdc));
-        assertEq(factory.feeBeneficiary(), treasury);
-        assertEq(token.SHARE_DECIMALS(), 6);
         assertEq(factory.MIN_LIQUIDITY(), MIN_LIQUIDITY);
     }
 
@@ -256,13 +253,10 @@ contract MarketFactoryTest is Test {
 
     function test_RevertWhen_FactoryConfigInvalid() public {
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(address(0), address(usdc), treasury);
+        new MarketFactory(address(0), address(usdc));
 
         vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(admin, address(0), treasury);
-
-        vm.expectRevert(IMarketFactory.InvalidConfig.selector);
-        new MarketFactory(admin, address(usdc), address(0));
+        new MarketFactory(admin, address(0));
     }
 
     // ---------------------------------------------------------------

@@ -37,6 +37,8 @@ interface IMarket {
     error CollateralNotReceived(uint256 expected, uint256 actual);
     error InitialInventoryMismatch(uint256 yesBalance, uint256 noBalance, uint256 expected);
     error TradingClosed(State currentState);
+    error TradingStillOpen();
+    error NoFeesToWithdraw();
     error ZeroAmount();
     error ZeroOutput();
     error DeadlineExpired(uint256 deadline, uint256 currentTime);
@@ -84,8 +86,12 @@ interface IMarket {
     function yesPool() external view returns (uint256);
     function noPool() external view returns (uint256);
     function accruedFees() external view returns (uint256);
-    function feeBeneficiary() external view returns (address);
+
+    /// @notice Anyone may trigger withdrawal once trading ends; fees are always sent to creator.
+    /// @dev Withdraws only accrued fees, never pool backing or unsolicited collateral donations.
+    function withdrawFees() external returns (uint256 amount);
 
     event Bought(address indexed trader, Outcome indexed outcome, uint256 collateralIn, uint256 sharesOut, uint256 fee);
     event Sold(address indexed trader, Outcome indexed outcome, uint256 sharesIn, uint256 collateralOut, uint256 fee);
+    event FeesWithdrawn(address indexed recipient, uint256 amount);
 }

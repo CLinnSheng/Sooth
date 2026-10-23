@@ -1,6 +1,6 @@
 # Trading engine
 
-Each market clone is its own two-outcome constant-product AMM. The factory seeds it with six-decimal USDC; the market mints an equal number of six-decimal YES and NO shares into its own ERC-1155 inventory. `OutcomeToken.SHARE_DECIMALS()` documents this project convention because ERC-1155 has no standard decimals field.
+Each market clone is its own two-outcome constant-product AMM. The factory seeds it with six-decimal collateral; the market mints an equal number of YES and NO shares into its own ERC-1155 inventory. Shares use the collateral's raw units: `1e6` units is one whole outcome share. ERC-1155 has no standard decimals field; clients can read `decimals()` from the market's collateral token.
 
 At initialization, `yesPool` and `noPool` are both `initialLiquidity`. The market checks the collateral arrived and verifies its actual YES/NO balances exactly match the recorded reserves. Later unsolicited transfers do not alter reserves or quotes; actual inventory may exceed reserves, never fall below them through supported trades.
 
@@ -32,15 +32,15 @@ All collateral and share amounts use six-decimal raw units: `1e6` is one USDC or
 
 ## Fees and deployment
 
-Each market accrues the existing 1% fee in `accruedFees`. Its fixed `feeBeneficiary` is the protocol treasury supplied to the factory constructor. Fees remain as collateral in the market, outside AMM reserves; this version does not provide a withdrawal function.
+Each market accrues the existing 1% fee in `accruedFees`, owed to its recorded `creator`: the platform wallet that supplied the seed liquidity and called `createMarket`. Fees remain as collateral in the market, outside AMM reserves. At or after `closeTime`, anyone can call `withdrawFees()` to transfer the entire accrued amount to that creator. The caller cannot choose a recipient. Withdrawal clears the fee balance before transferring, uses reentrancy protection, and emits `FeesWithdrawn`. It reverts while the market is Open or when no fees remain. A failed transfer restores the fee balance through transaction rollback.
 
-Deploy with a nonzero treasury address configured as `FEE_BENEFICIARY`. The factory also requires a six-decimal collateral token. On test chains, omitting `COLLATERAL` deploys `MockUSDC`; on other chains pass the intended collateral token. Existing market clones use their original implementation, so deploy a new factory to create trading-enabled markets.
+Deploy the factory with `(admin, collateral)` using a six-decimal collateral token. Each market pays its own creating wallet, which may differ between platform admins. On test chains, omitting `COLLATERAL` deploys `MockUSDC`; on other chains pass the intended collateral token. Existing market clones use their original implementation, so markets deployed without withdrawal support cannot gain it; deploy a new factory for markets supporting fee withdrawal.
 
 Example local deployment:
 
 ```sh
-FEE_BENEFICIARY=0xYourTreasuryAddress forge script script/DeployMarketFactory.s.sol:DeployMarketFactory \
+forge script script/DeployMarketFactory.s.sol:DeployMarketFactory \
   --rpc-url http://127.0.0.1:8545 --broadcast --private-key <anvil-key>
 ```
 
-After creation, approve seed USDC to the factory. Before trading, approve buy USDC to the market or call `setApprovalForAll(market, true)` on the outcome-token contract to sell. Run `forge test` from `contracts/` for factory and trading tests.
+Before creation, approve seed USDC to the factory. Before trading, approve buy USDC to the market or call `setApprovalForAll(market, true)` on the outcome-token contract to sell. After trading closes, call `withdrawFees()` on the market to pay its creator; pool backing and unsolicited collateral donations remain in the market. Run `forge test` from `contracts/` for factory and trading tests.
