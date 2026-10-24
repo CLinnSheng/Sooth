@@ -182,8 +182,12 @@ export function Change({ value }: { value: number }) {
   )
 }
 
+// Narrowest visible price span, so a 1-point wiggle doesn't fill the whole chart.
+const MIN_CHART_SPAN = 0.1
+const CHART_PAD = 0.02
+
 // Step line of YES probability between `from` and `to` (unix seconds): an AMM price holds until
-// the next trade moves it. Inline SVG, no chart library on purpose.
+// the next trade moves it. The y-axis zooms to the visible prices. Inline SVG, no chart library on purpose.
 export function PriceChart({ points, from, to, height = 160, axis = false }: {
   points: PricePoint[]
   from: number
@@ -195,17 +199,30 @@ export function PriceChart({ points, from, to, height = 160, axis = false }: {
   const start = (points.findLast((pt) => pt.at <= from) ?? points[0]).price
   const steps = [{ at: from, price: start }, ...points.filter((pt) => pt.at > from && pt.at <= to)]
   const x = (at: number) => ((at - from) / Math.max(to - from, 1)) * w
-  const y = (price: number) => (1 - price) * height
+  const prices = steps.map((pt) => pt.price)
+  const grow = Math.max(MIN_CHART_SPAN - (Math.max(...prices) - Math.min(...prices)), 0) / 2 + CHART_PAD
+  const lo = Math.max(0, Math.min(...prices) - grow)
+  const hi = Math.min(1, Math.max(...prices) + grow)
+  const y = (price: number) => ((hi - price) / (hi - lo)) * height
   const corners = steps.flatMap((pt, i) => (i ? [`${x(pt.at)},${y(steps[i - 1].price)}`, `${x(pt.at)},${y(pt.price)}`] : [`0,${y(pt.price)}`]))
   const xy = [...corners, `${w},${y(steps[steps.length - 1].price)}`].join(' ')
   return (
-    <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }} aria-hidden>
-      {axis &&
-        [0.25, 0.5, 0.75].map((g) => (
-          <line key={g} x1={0} x2={w} y1={(1 - g) * height} y2={(1 - g) * height} className="stroke-line" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-        ))}
-      <polyline points={xy} fill="none" className="stroke-yes" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-    </svg>
+    <div className="relative">
+      <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }} aria-hidden>
+        {axis &&
+          [0.25, 0.5, 0.75].map((g) => (
+            <line key={g} x1={0} x2={w} y1={(1 - g) * height} y2={(1 - g) * height} className="stroke-line" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          ))}
+        <polyline points={xy} fill="none" className="stroke-yes" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      </svg>
+      {/* The axis is zoomed, so its bounds are labelled to keep small moves from looking dramatic. */}
+      {axis && (
+        <>
+          <span className="absolute right-0 top-0 text-[10px] text-muted">{pct(hi)}</span>
+          <span className="absolute bottom-0 right-0 text-[10px] text-muted">{pct(lo)}</span>
+        </>
+      )}
+    </div>
   )
 }
 
