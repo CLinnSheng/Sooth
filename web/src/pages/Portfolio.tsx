@@ -4,7 +4,7 @@ import { Link } from 'react-router'
 import { useWallet } from '../wallet'
 import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
-import { basescanTx, cents, date, positionValue, priceOf, signed, usdc } from '../mock'
+import { ago, basescanTx, cents, positionValue, priceOf, signed, usdc } from '../mock'
 
 export default function Portfolio() {
   const { wallet, connect } = useWallet()
@@ -131,12 +131,12 @@ export default function Portfolio() {
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {history.map((t) => (
-                <tr key={t.tx}>
-                  <td className="p-4 text-muted">{date(t.at)}</td>
+              {history.map((t, i) => (
+                <tr key={`${t.tx}-${i}`}>
+                  <td className="p-4 text-muted" title={new Date(t.at).toLocaleString()}>{ago(t.at)}</td>
                   <td className={`p-4 ${t.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{t.side} {t.outcome}</td>
                   <td className="max-w-xs p-4"><Link to={`/market/${t.marketId}`} className="hover:underline">{marketById(t.marketId).question}</Link></td>
-                  <td className="p-4 text-right">{usdc(t.shares)}</td>
+                  <td className="p-4 text-right">{usdc(t.shares)} @ {cents(t.amount / t.shares)}</td>
                   <td className="p-4 text-right">{usdc(t.amount)} USDC</td>
                   <td className="p-4">
                     <a href={basescanTx(t.tx)} target="_blank" rel="noreferrer" aria-label="View transaction" className="text-muted hover:text-white">

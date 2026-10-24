@@ -5,6 +5,7 @@ import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { Change, PriceChart, ProbabilityBar, StatusBadge, TradePanel } from '../components'
 import {
+  ago,
   basescanAddr,
   basescanTx,
   cents,
@@ -152,12 +153,18 @@ export default function Market() {
           <h2 className="font-semibold">Recent activity</h2>
           {activity.length ? (
             <ul className="divide-y divide-line text-sm">
-              {activity.map((t) => (
-                <li key={t.tx} className="flex items-center gap-3 py-2">
-                  <span className="w-28 text-muted">{shortAddr(t.trader)}</span>
+              {activity.map((t, i) => (
+                // Fixed grid columns and tabular digits keep every row's numbers lined up.
+                <li
+                  key={`${t.tx}-${i}`}
+                  className="grid grid-cols-[6.5rem_4.5rem_1fr_4.5rem_1rem] items-center gap-3 whitespace-nowrap py-2 tabular-nums sm:grid-cols-[6.5rem_4.5rem_4.5rem_3.5rem_1fr_4.5rem_1rem]"
+                >
+                  <span className="text-muted">{shortAddr(t.trader)}</span>
                   <span className={t.outcome === 'YES' ? 'text-yes' : 'text-no'}>{t.side} {t.outcome}</span>
-                  <span className="ml-auto">{usdc(t.amount)} USDC</span>
-                  <span className="hidden w-24 text-right text-muted sm:block">{date(t.at)}</span>
+                  <span className="hidden text-right text-muted sm:block">{usdc(t.shares)}</span>
+                  <span className="hidden text-muted sm:block">@ {cents(t.amount / t.shares)}</span>
+                  <span className="text-right">{usdc(t.amount)} USDC</span>
+                  <span className="text-right text-muted" title={new Date(t.at).toLocaleString()}>{ago(t.at)}</span>
                   <a href={basescanTx(t.tx)} target="_blank" rel="noreferrer" aria-label="View transaction" className="text-muted hover:text-white">
                     <ArrowUpRight size={14} />
                   </a>

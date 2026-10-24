@@ -82,6 +82,15 @@ export const pct = (p: number) => `${Math.round(p * 100)}%`
 export const cents = (p: number, digits = 0) => `${(p * 100).toFixed(digits)}¢`
 export const signed = (n: number) => `${n >= 0 ? '+' : '−'}${usdc(Math.abs(n))}`
 export const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
+// "just now", "12m ago", "2h ago", "3d ago"; a date once older than a week.
+export function ago(iso: string) {
+  const secs = (Date.now() - Date.parse(iso)) / 1000
+  if (secs < 60) return 'just now'
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
+  if (secs < DAY_SECS) return `${Math.floor(secs / 3600)}h ago`
+  if (secs < 7 * DAY_SECS) return `${Math.floor(secs / DAY_SECS)}d ago`
+  return date(iso)
+}
 export const dateTime = (secs: number) =>
   new Date(secs * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
 export const date = (iso: string) =>
