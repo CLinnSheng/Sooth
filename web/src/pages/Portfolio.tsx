@@ -1,22 +1,36 @@
 import { ArrowUpRight, LoaderCircle, Wallet } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useParams } from 'react-router'
+import { erc20Abi, formatUnits, isAddress, zeroAddress } from 'viem'
 import { useWallet } from '../wallet'
-import { useAccount } from 'wagmi'
+import { useAccount, useReadContract } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { PAGE_SIZE, ShowMore } from '../components'
-import { ago, basescanTx, cents, positionValue, priceOf, signed, usdc } from '../mock'
+import { USDC } from '../contracts'
+import { ago, basescanAddr, basescanTx, cents, positionValue, priceOf, shortAddr, signed, usdc } from '../mock'
 
+// /portfolio is the connected wallet; /portfolio/:address is anyone's, read-only from public chain data.
 export default function Portfolio() {
+  const { address: viewed } = useParams()
   const { wallet, connect } = useWallet()
   const { address, isConnecting, isReconnecting } = useAccount()
+  const isOwn = !viewed || viewed.toLowerCase() === address?.toLowerCase()
+  const owner = viewed ? (isAddress(viewed) ? viewed : undefined) : address
   const { data } = useMarkets()
-  const positions = usePositions(address)
+  const positions = usePositions(owner)
+  const { data: viewedCash } = useReadContract({
+    address: USDC,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: [owner ?? zeroAddress],
+    query: { enabled: Boolean(owner && !isOwn) },
+  })
   const connecting = isConnecting || isReconnecting
   const [tab, setTab] = useState<'Positions' | 'History'>('Positions')
   const [historyShown, setHistoryShown] = useState(PAGE_SIZE)
 
-  if (!wallet)
+  if (viewed && !owner) return <p className="text-muted">Not a valid address.</p>
+  if (!owner)
     return (
       <div className="flex flex-col items-center gap-3 rounded-3xl border border-dashed border-line py-20 text-muted">
         <Wallet size={22} />
@@ -45,7 +59,8 @@ export default function Portfolio() {
   const total = rows.reduce((s, r) => s + r.value, 0)
   const pnl = rows.reduce((s, r) => s + r.pnl, 0)
   const cost = rows.reduce((s, r) => s + r.p.shares * r.p.avgPrice, 0)
-  const history = data.trades.filter((t) => t.trader.toLowerCase() === wallet.address.toLowerCase()).toReversed()
+  const history = data.trades.filter((t) => t.trader.toLowerCase() === owner.toLowerCase()).toReversed()
+  const cash = isOwn ? wallet?.usdc : viewedCash === undefined ? null : Number(formatUnits(viewedCash, 6))
 
   const stat = (label: string, value: ReactNode, extra?: ReactNode) => (
     <div className="flex flex-col gap-1 rounded-3xl bg-surface p-5">
@@ -57,7 +72,15 @@ export default function Portfolio() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-3xl font-bold tracking-tight">Portfolio</h1>
+      <h1 className="text-3xl font-bold tracking-tight">
+        {isOwn ? (
+          'Portfolio'
+        ) : (
+          <a href={basescanAddr(owner)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+            {shortAddr(owner)} <ArrowUpRight size={20} />
+          </a>
+        )}
+      </h1>
       <div className="grid gap-4 sm:grid-cols-3">
         {stat('Positions value', `${usdc(total)} USDC`)}
         {stat(
@@ -67,7 +90,7 @@ export default function Portfolio() {
         )}
         {stat(
           'Cash',
-          wallet.usdc == null ? <span className="text-muted">— USDC</span> : `${usdc(wallet.usdc)} USDC`,
+          cash == null ? <span className="text-muted">— USDC</span> : `${usdc(cash)} USDC`,
         )}
       </div>
 

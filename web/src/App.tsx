@@ -14,6 +14,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/market/:id" element={<Market />} />
           <Route path="/portfolio" element={<Portfolio />} />
+          <Route path="/portfolio/:address" element={<Portfolio />} />
           <Route path="*" element={<p className="text-zinc-500">Page not found.</p>} />
         </Routes>
       </main>
