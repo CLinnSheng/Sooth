@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
-import { Change, PriceChart, ProbabilityBar, StatusBadge, TradePanel } from '../components'
+import { Change, PAGE_SIZE, PriceChart, ProbabilityBar, ShowMore, StatusBadge, TradePanel } from '../components'
 import {
   ago,
   basescanAddr,
@@ -34,6 +34,7 @@ export default function Market() {
   const positions = usePositions(address)
   const [outcome, setOutcome] = useState<Outcome>(params.get('outcome') === 'NO' ? 'NO' : 'YES')
   const [range, setRange] = useState<keyof typeof ranges>('1M')
+  const [activityShown, setActivityShown] = useState(PAGE_SIZE)
 
   if (!data) return <p className="text-muted">{error ? 'Could not load market from Base Sepolia.' : 'Loading market…'}</p>
 
@@ -153,7 +154,7 @@ export default function Market() {
           <h2 className="font-semibold">Recent activity</h2>
           {activity.length ? (
             <ul className="divide-y divide-line text-sm">
-              {activity.map((t, i) => (
+              {activity.slice(0, activityShown).map((t, i) => (
                 // Fixed grid columns and tabular digits keep every row's numbers lined up.
                 <li
                   key={`${t.tx}-${i}`}
@@ -174,6 +175,7 @@ export default function Market() {
           ) : (
             <p className="text-sm text-muted">No trades yet.</p>
           )}
+          <ShowMore shown={activityShown} total={activity.length} onClick={() => setActivityShown((n) => n + PAGE_SIZE)} />
         </div>
       </section>
     </div>

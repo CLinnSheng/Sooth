@@ -314,6 +314,18 @@ export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Out
   )
 }
 
+// Long trade lists render this many rows per click; everything is already loaded, so this only limits DOM size.
+export const PAGE_SIZE = 10
+
+export function ShowMore({ shown, total, onClick }: { shown: number; total: number; onClick: () => void }) {
+  if (shown >= total) return null
+  return (
+    <button onClick={onClick} className={`w-full rounded-xl py-2 text-sm font-medium text-muted hover:bg-raised hover:text-white ${focus}`}>
+      Show {Math.min(PAGE_SIZE, total - shown)} more of {total - shown}
+    </button>
+  )
+}
+
 type Step = 'idle' | 'approving' | 'confirming' | 'done' | 'failed'
 
 const DEADLINE_SECS = 600

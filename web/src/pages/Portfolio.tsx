@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { useWallet } from '../wallet'
 import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
+import { PAGE_SIZE, ShowMore } from '../components'
 import { ago, basescanTx, cents, positionValue, priceOf, signed, usdc } from '../mock'
 
 export default function Portfolio() {
@@ -13,6 +14,7 @@ export default function Portfolio() {
   const positions = usePositions(address)
   const connecting = isConnecting || isReconnecting
   const [tab, setTab] = useState<'Positions' | 'History'>('Positions')
+  const [historyShown, setHistoryShown] = useState(PAGE_SIZE)
 
   if (!wallet)
     return (
@@ -131,7 +133,7 @@ export default function Portfolio() {
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {history.map((t, i) => (
+              {history.slice(0, historyShown).map((t, i) => (
                 <tr key={`${t.tx}-${i}`}>
                   <td className="p-4 text-muted" title={new Date(t.at).toLocaleString()}>{ago(t.at)}</td>
                   <td className={`p-4 ${t.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{t.side} {t.outcome}</td>
@@ -147,6 +149,9 @@ export default function Portfolio() {
               ))}
             </tbody>
           </table>
+        )}
+        {tab === 'History' && (
+          <ShowMore shown={historyShown} total={history.length} onClick={() => setHistoryShown((n) => n + PAGE_SIZE)} />
         )}
       </div>
     </div>
