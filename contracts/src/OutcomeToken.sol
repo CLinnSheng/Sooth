@@ -16,7 +16,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
     mapping(uint256 id => address market) public marketOf;
 
     modifier onlyMarketOf(uint256 id) {
-        _checkMarketOf(id);
+        _requireMarketOf(id);
         _;
     }
 
@@ -42,7 +42,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
 
     function mintBatch(address to, uint256[] calldata ids, uint256[] calldata amounts) external {
         for (uint256 i; i < ids.length; ++i) {
-            _checkMarketOf(ids[i]);
+            _requireMarketOf(ids[i]);
         }
         _mintBatch(to, ids, amounts, "");
     }
@@ -53,7 +53,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
 
     function burnBatch(address from, uint256[] calldata ids, uint256[] calldata amounts) external {
         for (uint256 i; i < ids.length; ++i) {
-            _checkMarketOf(ids[i]);
+            _requireMarketOf(ids[i]);
         }
         _burnBatch(from, ids, amounts);
     }
@@ -62,7 +62,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
         return super.totalSupply(id);
     }
 
-    function _checkMarketOf(uint256 id) internal view {
+    function _requireMarketOf(uint256 id) internal view {
         if (marketOf[id] != msg.sender) revert NotMarketForToken(msg.sender, id);
     }
 }
