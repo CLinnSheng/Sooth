@@ -173,8 +173,7 @@ export const priceOf = (m: Market, o: Outcome) => (o === 'YES' ? priceYes(m) : 1
 export const change30d = (m: Market) => m.history[m.history.length - 1] - m.history[Math.max(0, m.history.length - 31)]
 
 // Value of a position now: resolved markets pay 1 per winning share, 0 per losing share.
-export function positionValue(p: Position) {
-  const m = marketById(p.marketId)!
+export function positionValue(p: Position, m: Market) {
   if (m.status === 'resolved') return m.resolvedOutcome === p.outcome ? p.shares : 0
   return p.shares * priceOf(m, p.outcome)
 }

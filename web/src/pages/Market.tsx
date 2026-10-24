@@ -101,7 +101,7 @@ export default function Market() {
           <div className="flex flex-col gap-3 rounded-3xl bg-surface p-5">
             <h2 className="font-semibold">Your position</h2>
             {mine.map((pos) => {
-              const value = positionValue(pos)
+              const value = positionValue(pos, market)
               const pnl = value - pos.shares * pos.avgPrice
               return (
                 <div key={pos.outcome} className="grid grid-cols-2 gap-y-1 text-sm sm:grid-cols-4">

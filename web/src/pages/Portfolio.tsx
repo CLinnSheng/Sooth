@@ -29,7 +29,7 @@ export default function Portfolio() {
 
   const rows = positions.map((p) => {
     const m = marketById(p.marketId)!
-    const value = positionValue(p)
+    const value = positionValue(p, m)
     return { p, m, value, pnl: value - p.shares * p.avgPrice }
   })
   const total = rows.reduce((s, r) => s + r.value, 0)
