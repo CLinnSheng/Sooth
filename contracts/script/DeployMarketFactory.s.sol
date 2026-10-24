@@ -6,7 +6,7 @@ import {MarketFactory} from "../src/MarketFactory.sol";
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 
 /// @notice Deploys MarketFactory, plus MockUSDC when COLLATERAL is not set (test chains only).
-/// @dev Env vars: COLLATERAL (default: deploy MockUSDC), ADMIN (default: the broadcasting wallet).
+/// @dev Env vars: COLLATERAL (default: deploy MockUSDC), ADMIN (default: broadcasting wallet).
 ///
 ///      Local: anvil, then
 ///        forge script script/DeployMarketFactory.s.sol --rpc-url http://127.0.0.1:8545 \

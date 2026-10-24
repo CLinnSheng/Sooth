@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {Market} from "../src/Market.sol";
@@ -13,6 +14,14 @@ import {IMarketFactory} from "../src/interfaces/IMarketFactory.sol";
 import {IMarket} from "../src/interfaces/IMarket.sol";
 import {IOutcomeToken} from "../src/interfaces/IOutcomeToken.sol";
 import {OutcomeTokenId} from "../src/libraries/OutcomeTokenId.sol";
+
+contract WrongDecimalsToken is ERC20 {
+    constructor() ERC20("Wrong decimals", "WRONG") {}
+
+    function decimals() public pure override returns (uint8) {
+        return 18;
+    }
+}
 
 contract MarketFactoryTest is Test {
     uint256 constant MIN_LIQUIDITY = 10e6; // 10 mUSDC, must match MarketFactory.MIN_LIQUIDITY
@@ -96,15 +105,7 @@ contract MarketFactoryTest is Test {
 
         vm.expectEmit(true, true, true, true, address(factory));
         emit IMarketFactory.MarketCreated(
-            1,
-            predicted,
-            admin,
-            arbitrator,
-            address(usdc),
-            p.closeTime,
-            SPEC_HASH,
-            SPEC_CID,
-            LIQUIDITY
+            1, predicted, admin, arbitrator, address(usdc), p.closeTime, SPEC_HASH, SPEC_CID, LIQUIDITY
         );
         (, Market m) = _create(p);
         assertEq(address(m), predicted);
@@ -206,7 +207,7 @@ contract MarketFactoryTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // Validation (E1-2)
+    // Validation
     // ---------------------------------------------------------------
 
     function test_RevertWhen_ArbitratorIsZero() public {
@@ -267,8 +268,14 @@ contract MarketFactoryTest is Test {
         new MarketFactory(admin, address(0));
     }
 
+    function test_RevertWhen_CollateralDecimalsNotSix() public {
+        WrongDecimalsToken wrong = new WrongDecimalsToken();
+        vm.expectRevert(abi.encodeWithSelector(IMarketFactory.InvalidCollateralDecimals.selector, uint8(18)));
+        new MarketFactory(admin, address(wrong));
+    }
+
     // ---------------------------------------------------------------
-    // State machine (E1-3)
+    // State machine
     // ---------------------------------------------------------------
 
     function test_State_ClosedIsDerivedFromCloseTime() public {
@@ -327,7 +334,6 @@ contract MarketFactoryTest is Test {
             marketId: 99,
             creator: admin,
             arbitrator: arbitrator,
-            collateral: address(usdc),
             closeTime: uint64(block.timestamp + 7 days),
             specHash: SPEC_HASH,
             initialLiquidity: LIQUIDITY
@@ -380,6 +386,21 @@ contract MarketFactoryTest is Test {
         token.mintBatch(address(m1), ids, amounts);
     }
 
+    function test_RevertWhen_BurnBatchIncludesAnotherMarketsToken() public {
+        (, Market m1) = _create(_params());
+        (, Market m2) = _create(_params());
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = m1.yesTokenId();
+        ids[1] = m2.noTokenId();
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 1;
+        amounts[1] = 1;
+
+        vm.prank(address(m1));
+        vm.expectRevert(abi.encodeWithSelector(IOutcomeToken.NotMarketForToken.selector, address(m1), ids[1]));
+        token.burnBatch(address(m1), ids, amounts);
+    }
+
     function test_RevertWhen_MarketRegisteredTwice() public {
         (uint256 id,) = _create(_params());
         vm.prank(address(factory));
@@ -410,7 +431,7 @@ contract MarketFactoryTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // Fuzz: collateral invariant at creation (E8-4)
+    // Fuzz: collateral invariant at creation
     // ---------------------------------------------------------------
 
     function testFuzz_CreateMarket_FullyCollateralized(uint64 closeOffset, uint256 liquidity) public {

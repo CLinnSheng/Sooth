@@ -36,6 +36,7 @@ interface IMarketFactory {
     );
 
     error InvalidConfig();
+    error InvalidCollateralDecimals(uint8 decimals);
     error ZeroArbitrator();
     error CloseTimeInPast(uint64 closeTime, uint256 currentTime);
     error UnsupportedInitialProbability(uint16 initialYesProbabilityBps);

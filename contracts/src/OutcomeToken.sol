@@ -16,7 +16,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
     mapping(uint256 id => address market) public marketOf;
 
     modifier onlyMarketOf(uint256 id) {
-        _checkMarketOf(id);
+        _requireMarketOf(id);
         _;
     }
 
@@ -29,6 +29,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
 
         uint256 yesId = OutcomeTokenId.compute(marketId, IMarket.Outcome.Yes);
         uint256 noId = OutcomeTokenId.compute(marketId, IMarket.Outcome.No);
+        // YES and NO are always registered together, so checking YES covers both.
         if (marketOf[yesId] != address(0)) revert MarketAlreadyRegistered(marketId);
 
         marketOf[yesId] = market;
@@ -42,7 +43,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
 
     function mintBatch(address to, uint256[] calldata ids, uint256[] calldata amounts) external {
         for (uint256 i; i < ids.length; ++i) {
-            _checkMarketOf(ids[i]);
+            _requireMarketOf(ids[i]);
         }
         _mintBatch(to, ids, amounts, "");
     }
@@ -51,11 +52,18 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
         _burn(from, id, amount);
     }
 
+    function burnBatch(address from, uint256[] calldata ids, uint256[] calldata amounts) external {
+        for (uint256 i; i < ids.length; ++i) {
+            _requireMarketOf(ids[i]);
+        }
+        _burnBatch(from, ids, amounts);
+    }
+
     function totalSupply(uint256 id) public view override(ERC1155Supply, IOutcomeToken) returns (uint256) {
         return super.totalSupply(id);
     }
 
-    function _checkMarketOf(uint256 id) internal view {
+    function _requireMarketOf(uint256 id) internal view {
         if (marketOf[id] != msg.sender) revert NotMarketForToken(msg.sender, id);
     }
 }

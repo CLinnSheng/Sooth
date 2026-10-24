@@ -12,7 +12,7 @@ Design decisions referenced as **Q1–Q8** come from the team's market creation 
 | Q4 | The arbitrator **may** be the creator (risk documented in the threat model) |
 | Q5 | Spec **hash** stored on-chain, IPFS **CID** only in the event |
 | Q6 | **Admin-only** creation, so no creator bond yet |
-| Q7 | `minLiquidity` is a constructor parameter. The fee (flat 1%) and resolution window (7 days) are constants in `Market` |
+| Q7 | Minimum liquidity is a factory constant. The fee (flat 1%) and resolution window (7 days) are constants in `Market` |
 
 Run everything from `contracts/`: `forge build`, `forge test`.
 
@@ -106,7 +106,7 @@ One YES slip and one NO slip together are worth exactly 1 USDC, because one of t
 
 ### What is not built yet
 
-Today a market can be **created but not traded**. Buying and selling (E2), the arbitrator picking a winner (E3), and paying out winners (E3) don't exist yet. The USDC put in at creation stays in the market until those parts are written, so don't use real money.
+Markets support constant-product YES/NO trading with 1% fees accrued for the platform wallet recorded as creator. After trading closes, anyone can call `withdrawFees()` to pay the creator. Resolution, redemption, and liquidity withdrawal are not implemented yet. Use test collateral until the full lifecycle exists.
 
 ---
 
@@ -192,7 +192,7 @@ struct CreateParams {
 
 There is no `collateral` field: every market uses the single token (USDC) fixed in the factory at deployment.
 
-There is no fee or deadline field either. Every trade pays a flat 1% (`Market.FEE_BPS = 100`), and the resolution deadline is always `closeTime + 7 days` (`Market.RESOLUTION_WINDOW`). The deadline is a maximum, not a wait: the arbitrator can resolve any time after close and winners redeem straight away. Only if nobody resolves by the deadline can the market be cancelled and refunded.
+There is no fee or resolution deadline input. Every trade pays a flat 1% (`Market.FEE_BPS = 100`), accrued for the market creator and withdrawable after trading closes. The resolution deadline is `closeTime + 7 days` (`Market.RESOLUTION_WINDOW`); resolution and redemption behavior is not implemented yet.
 
 `uint64` and `uint16` are smaller number types. They're big enough for timestamps and percentages, and the compiler can pack them together to save storage.
 
@@ -376,7 +376,7 @@ function state() public view returns (State) {
 
 - `block.timestamp` is the current block's time in unix seconds.
 - `view` means it only reads data. Calling it from the frontend is free.
-- Nobody needs to send a "close the market" transaction. As soon as the time passes, `state()` reports `Closed`. Trading functions (E2) will check `state() == Open`, which enforces "no trades after close" automatically.
+- Nobody needs to send a "close the market" transaction. As soon as the time passes, `state()` reports `Closed`; buy and sell functions require `state() == Open`.
 
 #### Prices
 
@@ -388,7 +388,7 @@ function priceYes() external view returns (uint256) {
 
 - This is the AMM formula from the backlog: `P(YES) = NO_pool / (YES_pool + NO_pool)`.
 - **Why `* 1e18`?** There are no decimals in Solidity, and `100 / 200` would give 0. Multiplying first gives `0.5 × 10^18 = 500000000000000000`, which the frontend divides by 10^18 to show "50%". This "18-decimal fixed point" convention is used across Ethereum.
-- **Why the *NO* pool is on top:** when someone buys YES, YES tokens leave the pool, so the YES pool gets smaller relative to NO. YES becomes scarce and its price goes up. This gets implemented in E2.
+- **Why the *NO* pool is on top:** when someone buys YES, YES tokens leave the pool, so the YES pool gets smaller relative to NO. YES becomes scarce and its price goes up.
 
 ### 3.6 `MarketFactory.sol`: the main contract
 
@@ -417,8 +417,8 @@ mapping(address => bool) public isMarket;     // is this address one of our mark
 #### Constructor
 
 ```solidity
-constructor(address admin, uint256 minLiquidity_, address collateral_) {
-    if (admin == address(0) || collateral_ == address(0) || minLiquidity_ == 0) revert InvalidConfig();
+constructor(address admin, address collateral_) {
+    if (admin == address(0) || collateral_ == address(0)) revert InvalidConfig();
     collateral = IERC20(collateral_);
     ...
     OutcomeToken token = new OutcomeToken(address(this));
@@ -428,7 +428,7 @@ constructor(address admin, uint256 minLiquidity_, address collateral_) {
 }
 ```
 
-- `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token)` deploys the implementation and tells it both addresses. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
+- `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token)` deploys the implementation with its factory and outcome-token addresses. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
 - Zero minimums are rejected, because a market that closes instantly or has an empty pool makes no sense. This also lets `_validate` use simpler checks.
 - The collateral token is fixed forever. Only USDC is supported, so there is no whitelist to manage; supporting another token means deploying a new factory.
 - `DEFAULT_ADMIN_ROLE` can create markets and grant or revoke the role for other admins.
@@ -502,7 +502,7 @@ Foundry tests are written in Solidity. Every function starting with `test` is ru
 function setUp() public {
     vm.warp(1_760_000_000);                   // set the blockchain clock to a fixed time
     usdc = new MockUSDC();
-    factory = new MarketFactory(admin, MIN_LIQUIDITY, address(usdc));
+    factory = new MarketFactory(admin, address(usdc));
     usdc.mint(admin, 1_000_000e6);            // give the admin 1M fake USDC
     vm.prank(admin);
     usdc.approve(address(factory), type(uint256).max);  // admin allows the factory to take USDC
@@ -550,7 +550,6 @@ This is the **collateral invariant** from the project plan: the market always ho
 ## 5. The deploy script (`script/DeployMarketFactory.s.sol`)
 
 ```solidity
-uint256 minLiquidity = vm.envOr("MIN_LIQUIDITY", uint256(10e6));
 collateral = vm.envOr("COLLATERAL", address(0));
 require(collateral != address(0) || _isTestChain(), "Set COLLATERAL: MockUSDC is test-chain only");
 
@@ -558,7 +557,7 @@ vm.startBroadcast();
 address admin = vm.envOr("ADMIN", msg.sender);
 require(admin != DEFAULT_SENDER, "No deployer wallet: ...");
 if (collateral == address(0)) collateral = address(new MockUSDC());
-factory = new MarketFactory(admin, minLiquidity, collateral);
+factory = new MarketFactory(admin, collateral);
 vm.stopBroadcast();
 ```
 
@@ -570,7 +569,6 @@ vm.stopBroadcast();
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `MIN_LIQUIDITY` | 10000000 (10 mUSDC) | Smallest seed amount |
 | `COLLATERAL` | deploy new MockUSDC (test chains only) | Existing collateral token address. Required on other chains |
 | `ADMIN` | the deploying wallet | Who gets the admin role (can create markets) |
 
@@ -644,7 +642,7 @@ Deployed with `DeployMarketFactory.s.sol`, then used `cast` against the live loc
 
 ### Not covered yet (needs later epics)
 
-- End-to-end lifecycle test (create → trade → close → resolve → redeem) needs E2 and E3.
+- End-to-end lifecycle test through resolution and redemption still needs those settlement functions.
 - Stateful `invariant_` tests become meaningful once trading exists.
 - Reentrancy tests with a malicious token matter once trading and redemption move funds to users.
 
@@ -672,6 +670,6 @@ Together these cut market creation gas by about 92k (−13.6%).
 
 | Issue | Why |
 |---|---|
-| Seed liquidity has no way out of the market yet | By design for now: payout, refund and liquidity withdrawal are E2/E3. Don't put real value in markets until they exist |
+| Seed liquidity has no withdrawal path yet | Resolution, redemption, and liquidity withdrawal are not implemented yet; accrued trading fees can be withdrawn to the creator after close |
 | Balance check is `>=`, so tokens sent to the address early are counted | Using `==` would let anyone block creation by sending 1 unit to the predictable next market address. With `>=`, a stray donation only strands the donor's own money |
 | `OutcomeToken` stores the owner for both the YES and NO IDs (2 writes) | Removing it saves about 22k gas but needs an awkward mint signature, because a hashed token ID can't be turned back into a market ID |
