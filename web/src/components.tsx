@@ -145,6 +145,12 @@ export function CategoryLabel({ category }: { category: Category }) {
 }
 
 export function StatusBadge({ market }: { market: Market }) {
+  if (market.status === 'closed')
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-xs font-medium text-muted">
+        <span className="size-1.5 rounded-full bg-muted" /> Trading closed
+      </span>
+    )
   if (market.status === 'resolved')
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-black">
@@ -228,9 +234,9 @@ export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Out
   return (
     <article className="relative flex flex-col gap-4 rounded-3xl bg-surface p-5 transition-colors hover:bg-[#232325]">
       <div className="flex items-center justify-between">
-        <CategoryLabel category={market.category} />
-        <span className="text-xs text-muted">
-          {market.status === 'resolved' ? 'Closed' : 'Closes'} {date(market.closesAt)}
+        {market.category && <CategoryLabel category={market.category} />}
+        <span className="ml-auto text-xs text-muted">
+          {market.status === 'open' ? 'Closes' : 'Closed'} {date(market.closesAt)}
         </span>
       </div>
       <h3 className="font-semibold leading-snug">
@@ -316,7 +322,7 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
   }
 
   let action: { label: ReactNode; onClick?: () => void; disabled?: boolean }
-  if (market.status === 'resolved') action = { label: 'Trading closed', disabled: true }
+  if (market.status !== 'open') action = { label: 'Trading closed', disabled: true }
   else if (isConnecting || isReconnecting)
     action = { label: <><LoaderCircle size={16} className="animate-spin" /> Connecting wallet…</>, disabled: true }
   else if (!wallet) action = { label: 'Connect wallet to trade', onClick: connect }

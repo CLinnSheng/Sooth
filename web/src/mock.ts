@@ -2,14 +2,16 @@
 // contract reads (viem/wagmi) once the contracts exist.
 
 export type Category = 'Crypto' | 'Economics' | 'Science' | 'Climate' | 'Sports'
+export const categories: Category[] = ['Crypto', 'Economics', 'Science', 'Climate', 'Sports']
 export type Outcome = 'YES' | 'NO'
 
 export type Market = {
   id: number
+  address: string
   question: string
-  category: Category
+  category?: Category // unset when the spec can't be verified
   closesAt: string // ISO timestamp
-  status: 'open' | 'resolved'
+  status: 'open' | 'closed' | 'resolved'
   resolvedOutcome?: Outcome
   // CPMM pool reserves of outcome shares. YES price = noReserve / (yesReserve + noReserve).
   yesReserve: number
@@ -17,7 +19,7 @@ export type Market = {
   volume: number // USDC
   history: number[] // daily YES price, oldest first, last = current
   rules: string
-  source: { label: string; url: string }
+  source?: { label: string; url: string }
 }
 
 export type Position = { marketId: number; outcome: Outcome; shares: number; avgPrice: number }
@@ -57,6 +59,7 @@ const placeholderRules =
 export const markets: Market[] = [
   {
     id: 1,
+    address: MARKET_ADDRESS,
     question: 'Will ETH be at or above $4,000 on January 1, 2027?',
     category: 'Crypto',
     closesAt: '2026-12-31T23:59:00Z',
@@ -69,6 +72,7 @@ export const markets: Market[] = [
   },
   {
     id: 2,
+    address: MARKET_ADDRESS,
     question: 'Will BTC be at or above $100,000 on January 1, 2027?',
     category: 'Crypto',
     closesAt: '2026-12-31T23:59:00Z',
@@ -81,6 +85,7 @@ export const markets: Market[] = [
   },
   {
     id: 3,
+    address: MARKET_ADDRESS,
     question: 'Will US annual CPI be below 3% for December 2026?',
     category: 'Economics',
     closesAt: '2027-01-12T13:30:00Z',
@@ -93,6 +98,7 @@ export const markets: Market[] = [
   },
   {
     id: 4,
+    address: MARKET_ADDRESS,
     question: 'Will the Fed upper target rate be below 4% after its December meeting?',
     category: 'Economics',
     closesAt: '2026-12-09T19:00:00Z',
@@ -105,6 +111,7 @@ export const markets: Market[] = [
   },
   {
     id: 5,
+    address: MARKET_ADDRESS,
     question: 'Will NASA launch Artemis III before January 1, 2027?',
     category: 'Science',
     closesAt: '2026-12-31T23:59:00Z',
@@ -117,6 +124,7 @@ export const markets: Market[] = [
   },
   {
     id: 6,
+    address: MARKET_ADDRESS,
     question: 'Will New York reach 32°C on June 1, 2027?',
     category: 'Climate',
     closesAt: '2027-06-02T04:00:00Z',
@@ -129,6 +137,7 @@ export const markets: Market[] = [
   },
   {
     id: 7,
+    address: MARKET_ADDRESS,
     question: 'Will the Sooth testnet launch before November 1, 2026?',
     category: 'Crypto',
     closesAt: '2026-10-01T00:00:00Z',
@@ -161,7 +170,7 @@ export const marketById = (id: number) => markets.find((m) => m.id === id)
 
 export const priceYes = (m: Market) => m.noReserve / (m.yesReserve + m.noReserve)
 export const priceOf = (m: Market, o: Outcome) => (o === 'YES' ? priceYes(m) : 1 - priceYes(m))
-export const change30d = (m: Market) => m.history[m.history.length - 1] - m.history[m.history.length - 31]
+export const change30d = (m: Market) => m.history[m.history.length - 1] - m.history[Math.max(0, m.history.length - 31)]
 
 // Value of a position now: resolved markets pay 1 per winning share, 0 per losing share.
 export function positionValue(p: Position) {
