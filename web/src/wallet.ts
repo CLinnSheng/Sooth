@@ -1,11 +1,9 @@
 import { createContext, createElement, useContext, type ReactNode } from 'react'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { erc20Abi, formatUnits, zeroAddress, type Address } from 'viem'
+import { erc20Abi, formatUnits, zeroAddress } from 'viem'
 import { useAccount, useDisconnect, useReadContract } from 'wagmi'
 import { baseSepolia } from 'wagmi/chains'
-
-// Sooth's MockUSDC (mUSDC, 6 decimals), the collateral for every market.
-const BASE_SEPOLIA_USDC: Address = '0x5f29331BBBA6f605942f5de0B217359F3C7B7c51'
+import { USDC } from './contracts'
 
 export type WalletState = {
   // usdc is the wallet's mUSDC balance on Base Sepolia; null while loading,
@@ -22,7 +20,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const { openConnectModal } = useConnectModal()
   const { disconnect } = useDisconnect()
   const { data: balance } = useReadContract({
-    address: BASE_SEPOLIA_USDC,
+    address: USDC,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: [address ?? zeroAddress],
