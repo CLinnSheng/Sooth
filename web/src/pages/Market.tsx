@@ -49,8 +49,11 @@ export default function Market() {
   const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
   const now = Date.now() / 1000
-  // A range longer than the market's life starts at creation.
-  const from = Math.max(market.history[0].at, now - ranges[range])
+  const age = now - market.history[0].at
+  // A range at least as long as the market's life would just repeat All.
+  const available = (Object.keys(ranges) as (keyof typeof ranges)[]).filter((r) => ranges[r] < age || r === 'All')
+  const shownRange = available.includes(range) ? range : 'All'
+  const from = Math.max(market.history[0].at, now - ranges[shownRange])
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -74,18 +77,20 @@ export default function Market() {
             <span className="ml-auto"><Change value={changeSince(market, now - from)} /></span>
           </div>
           <ProbabilityBar p={p} />
-          <div className="flex justify-end gap-1 text-xs">
-            {(Object.keys(ranges) as (keyof typeof ranges)[]).map((r) => (
-              <button
-                key={r}
-                aria-pressed={range === r}
-                onClick={() => setRange(r)}
-                className={`rounded-full px-2.5 py-0.5 font-medium ${range === r ? 'bg-white text-black' : 'text-muted hover:bg-raised'}`}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
+          {available.length > 1 && (
+            <div className="flex justify-end gap-1 text-xs">
+              {available.map((r) => (
+                <button
+                  key={r}
+                  aria-pressed={shownRange === r}
+                  onClick={() => setRange(r)}
+                  className={`rounded-full px-2.5 py-0.5 font-medium ${shownRange === r ? 'bg-white text-black' : 'text-muted hover:bg-raised'}`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
           <PriceChart points={market.history} from={from} to={now} height={200} axis />
           <div className="flex justify-between text-xs text-muted">
             <span>{dateTime(from)}</span>
