@@ -26,8 +26,8 @@ contract WrongDecimalsToken is ERC20 {
 contract MarketFactoryTest is Test {
     uint256 constant MIN_LIQUIDITY = 10e6; // 10 mUSDC, must match MarketFactory.MIN_LIQUIDITY
     uint256 constant LIQUIDITY = 100e6;
-    bytes32 constant SPEC_HASH = keccak256('{"question":"Will BTC/USD exceed $150,000 before 31 Dec 2026?"}');
-    string constant SPEC_CID = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+    string constant SPEC = '{"question":"Will BTC/USD exceed $150,000 before 31 Dec 2026?"}';
+    bytes32 constant SPEC_HASH = keccak256(bytes(SPEC));
 
     MarketFactory factory;
     MockUSDC usdc;
@@ -53,8 +53,7 @@ contract MarketFactoryTest is Test {
             arbitrator: arbitrator,
             closeTime: uint64(block.timestamp + 7 days),
             initialYesProbabilityBps: 5_000,
-            specHash: SPEC_HASH,
-            specCID: SPEC_CID,
+            spec: SPEC,
             initialLiquidity: LIQUIDITY
         });
     }
@@ -105,7 +104,7 @@ contract MarketFactoryTest is Test {
 
         vm.expectEmit(true, true, true, true, address(factory));
         emit IMarketFactory.MarketCreated(
-            1, predicted, admin, arbitrator, address(usdc), p.closeTime, SPEC_HASH, SPEC_CID, LIQUIDITY
+            1, predicted, admin, arbitrator, address(usdc), p.closeTime, SPEC_HASH, SPEC, LIQUIDITY
         );
         (, Market m) = _create(p);
         assertEq(address(m), predicted);
@@ -248,16 +247,10 @@ contract MarketFactoryTest is Test {
         );
     }
 
-    function test_RevertWhen_SpecHashEmpty() public {
+    function test_RevertWhen_SpecEmpty() public {
         IMarketFactory.CreateParams memory p = _params();
-        p.specHash = bytes32(0);
-        _expectCreateRevert(p, abi.encodeWithSelector(IMarketFactory.EmptySpecHash.selector));
-    }
-
-    function test_RevertWhen_SpecCIDEmpty() public {
-        IMarketFactory.CreateParams memory p = _params();
-        p.specCID = "";
-        _expectCreateRevert(p, abi.encodeWithSelector(IMarketFactory.EmptySpecCID.selector));
+        p.spec = "";
+        _expectCreateRevert(p, abi.encodeWithSelector(IMarketFactory.EmptySpec.selector));
     }
 
     function test_RevertWhen_FactoryConfigInvalid() public {

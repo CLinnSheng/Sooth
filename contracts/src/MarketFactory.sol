@@ -52,6 +52,7 @@ contract MarketFactory is AccessControl, IMarketFactory {
         returns (uint256 marketId, address market)
     {
         _validate(p);
+        bytes32 specHash = keccak256(bytes(p.spec));
 
         marketId = ++marketCount;
         market = Clones.clone(implementation);
@@ -68,7 +69,7 @@ contract MarketFactory is AccessControl, IMarketFactory {
                     creator: msg.sender,
                     arbitrator: p.arbitrator,
                     closeTime: p.closeTime,
-                    specHash: p.specHash,
+                    specHash: specHash,
                     initialLiquidity: p.initialLiquidity
                 })
             );
@@ -80,8 +81,8 @@ contract MarketFactory is AccessControl, IMarketFactory {
             p.arbitrator,
             address(collateral),
             p.closeTime,
-            p.specHash,
-            p.specCID,
+            specHash,
+            p.spec,
             p.initialLiquidity
         );
     }
@@ -96,7 +97,6 @@ contract MarketFactory is AccessControl, IMarketFactory {
             revert UnsupportedInitialProbability(p.initialYesProbabilityBps);
         }
         if (p.initialLiquidity < MIN_LIQUIDITY) revert LiquidityTooLow(p.initialLiquidity, MIN_LIQUIDITY);
-        if (p.specHash == bytes32(0)) revert EmptySpecHash();
-        if (bytes(p.specCID).length == 0) revert EmptySpecCID();
+        if (bytes(p.spec).length == 0) revert EmptySpec();
     }
 }

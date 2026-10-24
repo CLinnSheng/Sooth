@@ -76,8 +76,7 @@ contract MarketTradingTest is Test {
     uint256 private constant LIQUIDITY = 100e6;
     uint256 private constant TRADE = 10e6;
     uint256 private constant TRADE_FEE = 0.1e6; // 1% of TRADE
-    bytes32 private constant SPEC_HASH = keccak256("market rules");
-    string private constant SPEC_CID = "bafy-market-rules";
+    string private constant SPEC = "market rules";
 
     MockUSDC private usdc;
     IOutcomeToken private token;
@@ -105,8 +104,7 @@ contract MarketTradingTest is Test {
                 arbitrator: arbitrator,
                 closeTime: uint64(block.timestamp + 7 days),
                 initialYesProbabilityBps: 5_000,
-                specHash: SPEC_HASH,
-                specCID: SPEC_CID,
+                spec: SPEC,
                 initialLiquidity: LIQUIDITY
             })
         );

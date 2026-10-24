@@ -16,10 +16,9 @@ interface IMarketFactory {
         /// @dev Starting YES probability in basis points. Must be 5000 (50/50) for now;
         ///      kept in the interface so custom odds can be added without an ABI change.
         uint16 initialYesProbabilityBps;
-        /// @dev keccak256 of the exact spec JSON bytes uploaded to IPFS.
-        bytes32 specHash;
-        /// @dev IPFS CID of the spec JSON. Emitted in MarketCreated, not stored.
-        string specCID;
+        /// @dev Spec JSON: question, category, rules, source. Emitted in MarketCreated, not stored;
+        ///      the market keeps only its keccak256, which the factory computes.
+        string spec;
         uint256 initialLiquidity;
     }
 
@@ -31,7 +30,7 @@ interface IMarketFactory {
         address collateral,
         uint64 closeTime,
         bytes32 specHash,
-        string specCID,
+        string spec,
         uint256 initialLiquidity
     );
 
@@ -41,8 +40,7 @@ interface IMarketFactory {
     error CloseTimeInPast(uint64 closeTime, uint256 currentTime);
     error UnsupportedInitialProbability(uint16 initialYesProbabilityBps);
     error LiquidityTooLow(uint256 initialLiquidity, uint256 minLiquidity);
-    error EmptySpecHash();
-    error EmptySpecCID();
+    error EmptySpec();
 
     /// @notice Creates a market and seeds it with `initialLiquidity` collateral from the caller.
     ///         The caller must first approve this factory for `initialLiquidity`.
