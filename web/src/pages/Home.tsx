@@ -8,7 +8,6 @@ import { categories, type Category, type Market, type Outcome } from '../mock'
 const categoryFilters: ('All' | Category)[] = ['All', ...categories]
 const sorts = {
   Volume: (a: Market, b: Market) => b.volume - a.volume,
-  'Closing soon': (a: Market, b: Market) => a.closesAt.localeCompare(b.closesAt),
   Newest: (a: Market, b: Market) => b.id - a.id,
 }
 
@@ -54,16 +53,18 @@ export default function Home() {
               {c}
             </button>
           ))}
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as keyof typeof sorts)}
-            aria-label="Sort markets"
-            className="ml-auto rounded-md bg-transparent py-1 text-sm text-muted"
-          >
-            {Object.keys(sorts).map((s) => (
-              <option key={s}>{s}</option>
+          <div role="group" aria-label="Sort markets" className="ml-auto flex rounded-full bg-surface p-1 text-sm">
+            {(Object.keys(sorts) as (keyof typeof sorts)[]).map((s) => (
+              <button
+                key={s}
+                aria-pressed={sort === s}
+                onClick={() => setSort(s)}
+                className={`rounded-full px-3 py-1 font-medium ${sort === s ? 'bg-white text-black' : 'text-muted hover:text-white'}`}
+              >
+                {s}
+              </button>
             ))}
-          </select>
+          </div>
         </div>
 
         {list.length ? (
