@@ -5,9 +5,7 @@
   "observability": {
     "enabled": true
   },
-{
   "assets": {
     "directory": "./web/dist"
   }
-}
 }
