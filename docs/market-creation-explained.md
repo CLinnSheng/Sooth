@@ -10,7 +10,7 @@ Design decisions referenced as **Q1–Q8** come from the team's market creation 
 | Q2 | Token IDs are **hashed**: `keccak256(abi.encode(marketId, outcome))` |
 | Q3 | Markets start at **50/50**; `initialYesProbabilityBps` exists in the interface for later |
 | Q4 | The arbitrator **may** be the creator (risk documented in the threat model) |
-| Q5 | Spec **hash** stored on-chain, IPFS **CID** only in the event |
+| Q5 | Full spec JSON emitted in `MarketCreated`; only its **hash** is stored, computed by the factory |
 | Q6 | **Admin-only** creation, so no creator bond yet |
 | Q7 | Minimum liquidity is a factory constant. The fee (flat 1%) and resolution window (7 days) are constants in `Market` |
 
@@ -102,7 +102,7 @@ One YES slip and one NO slip together are worth exactly 1 USDC, because one of t
 | Only the factory can set up a new market | A stranger grabbing a fresh market and making themselves the judge |
 | Only the owning market can create its slips | One buggy market printing slips for another market |
 | Market checks it really received the USDC | Slips with no money behind them |
-| Spec stored as a hash, rules file on IPFS | Anyone can verify the rules were never swapped |
+| Factory hashes the spec, full text in the creation event | Anyone can verify the rules were never swapped, without trusting the creator's hash or an off-chain host |
 
 ### What is not built yet
 
@@ -177,15 +177,14 @@ Interfaces also hold the shared **types**, **events** and **errors**.
 
 #### `IMarketFactory.sol`
 
-**The input struct.** A `struct` groups fields together, so the frontend passes one object instead of 6 separate arguments:
+**The input struct.** A `struct` groups fields together, so the frontend passes one object instead of 5 separate arguments:
 
 ```solidity
 struct CreateParams {
     address arbitrator;              // who will resolve the market
     uint64  closeTime;               // when trading stops (unix seconds, UTC)
     uint16  initialYesProbabilityBps;// must be 5000 (= 50%) for now (Q3)
-    bytes32 specHash;                // fingerprint of the rules file (Q5)
-    string  specCID;                 // IPFS address of the rules file (Q5)
+    string  spec;                    // the rules JSON; emitted, and hashed into specHash (Q5)
     uint256 initialLiquidity;        // how much USDC to seed the market with
 }
 ```
@@ -202,7 +201,7 @@ There is no fee or resolution deadline input. Every trade pays a flat 1% (`Marke
 event MarketCreated(uint256 indexed marketId, address indexed market, address indexed creator, ...);
 ```
 
-An **event** is a log message stored on the blockchain. Contracts can't read events, but the frontend and indexer can. `indexed` fields are searchable, so the frontend can ask for "all markets created by address X". This is where `specCID` lives (Q5).
+An **event** is a log message stored on the blockchain. Contracts can't read events, but the frontend and indexer can. `indexed` fields are searchable, so the frontend can ask for "all markets created by address X". This is where the full `spec` text lives (Q5): a log costs about 8 gas per byte, storage about 20,000 gas per 32 bytes, and no contract ever reads the text.
 
 **Custom errors:**
 
@@ -467,8 +466,7 @@ if (p.arbitrator == address(0)) revert ZeroArbitrator();
 if (p.closeTime <= block.timestamp) revert CloseTimeInPast(...);
 if (p.initialYesProbabilityBps != FIFTY_FIFTY_BPS) revert UnsupportedInitialProbability(...);
 if (p.initialLiquidity < minLiquidity) revert LiquidityTooLow(...);
-if (p.specHash == bytes32(0)) revert EmptySpecHash();
-if (bytes(p.specCID).length == 0) revert EmptySpecCID();
+if (bytes(p.spec).length == 0) revert EmptySpec();
 ```
 
 | Check | Why |
@@ -477,7 +475,7 @@ if (bytes(p.specCID).length == 0) revert EmptySpecCID();
 | Close time in the future | A market closing at or before now would start `Closed`, with its seed USDC locked and no way to trade. Only admins create markets, so there is no minimum duration beyond that |
 | Probability = 50% | Only 50/50 is supported for now (Q3). The field exists so adding custom odds later doesn't change the interface |
 | Liquidity ≥ minimum | Tiny pools make prices swing wildly. Since `minLiquidity` is never 0, this also rules out an empty pool, whose 0/0 price would crash `priceYes()` |
-| Spec hash and CID not empty | Every market must have committed rules (Q5) |
+| Spec not empty | Every market must have committed rules (Q5). The factory hashes it itself, so the stored hash always matches the emitted text |
 
 Arbitrator = creator is deliberately **allowed** (Q4).
 
