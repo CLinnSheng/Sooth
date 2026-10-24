@@ -12,12 +12,17 @@ import {
   Wallet,
 } from 'lucide-react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
+import { useQueryClient } from '@tanstack/react-query'
 import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Link, NavLink } from 'react-router'
-import { useAccount, useSwitchChain } from 'wagmi'
+import { BaseError, UserRejectedRequestError, erc20Abi, formatUnits, parseUnits, zeroAddress, type Address, type Hex } from 'viem'
+import { useAccount, useReadContract, useReadContracts, useSwitchChain, useWriteContract } from 'wagmi'
+import { waitForTransactionReceipt } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
+import { OUTCOME_TOKEN, USDC, marketAbi, outcomeTokenAbi } from './contracts'
 import {
   FEE,
+  basescanTx,
   cents,
   change30d,
   compact,
@@ -32,6 +37,7 @@ import {
   type Outcome,
 } from './mock'
 import { useWallet } from './wallet'
+import { config } from './wagmi'
 
 const press = 'transition active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100'
 // System blue reads on both light and dark surfaces.
@@ -277,48 +283,97 @@ export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Out
   )
 }
 
-type Step = 'idle' | 'approving' | 'confirming' | 'done'
+type Step = 'idle' | 'approving' | 'confirming' | 'done' | 'failed'
 
-// Fully local trade ticket: real CPMM math on mock reserves, fake approve/confirm flow.
-export function TradePanel({ market, outcome, setOutcome, held }: {
+const DEADLINE_SECS = 600
+const SHARE_DECIMALS = 6 // shares are minted 1:1 with 6-decimal USDC
+
+// Trade ticket: local CPMM quotes on live pools, real approve and buy/sell transactions.
+export function TradePanel({ market, outcome, setOutcome }: {
   market: Market
   outcome: Outcome
   setOutcome: (o: Outcome) => void
-  held: number // shares of `outcome` the wallet holds
 }) {
   const { wallet, connect } = useWallet()
-  const { chain, isConnecting, isReconnecting } = useAccount()
+  const { address, chain, isConnecting, isReconnecting } = useAccount()
   const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
+  const queryClient = useQueryClient()
+  const { writeContractAsync } = useWriteContract()
   const [mode, setMode] = useState<'Buy' | 'Sell'>('Buy')
   const [input, setInput] = useState('')
   const [slippage, setSlippage] = useState(0.01)
-  const [approved, setApproved] = useState(false)
   const [step, setStep] = useState<Step>('idle')
-  const [result, setResult] = useState('')
+  const [result, setResult] = useState<{ text: string; tx?: Hex }>({ text: '' })
+
+  const marketAddress = market.address as Address
+  const owner = address ?? zeroAddress
+  const { data: tokenId } = useReadContract({
+    address: marketAddress,
+    abi: marketAbi,
+    functionName: outcome === 'YES' ? 'yesTokenId' : 'noTokenId',
+  })
+  const { data: reads } = useReadContracts({
+    allowFailure: false,
+    contracts: [
+      { address: USDC, abi: erc20Abi, functionName: 'allowance', args: [owner, marketAddress] },
+      { address: OUTCOME_TOKEN, abi: outcomeTokenAbi, functionName: 'isApprovedForAll', args: [owner, marketAddress] },
+      { address: OUTCOME_TOKEN, abi: outcomeTokenAbi, functionName: 'balanceOf', args: [owner, tokenId ?? 0n] },
+    ],
+    query: { enabled: Boolean(address && tokenId !== undefined) },
+  })
+  const [allowance, isSellApproved, heldRaw] = reads ?? [0n, false, 0n]
+  const held = Number(formatUnits(heldRaw, SHARE_DECIMALS))
 
   const amount = Number(input) || 0
+  const amountRaw = amount > 0 ? parseUnits(input, SHARE_DECIMALS) : 0n
+  const needsApproval = mode === 'Buy' ? allowance < amountRaw : !isSellApproved
   const p = priceYes(market)
   const buy = mode === 'Buy' ? quoteBuy(market, outcome, amount) : null
   const sell = mode === 'Sell' ? quoteSell(market, outcome, amount) : null
   const impact = (buy ?? sell)!.impact
   const busy = step === 'approving' || step === 'confirming'
+  const expectedOut = buy ? buy.shares : (sell?.received ?? 0)
+  const minOut = BigInt(Math.floor(expectedOut * (1 - slippage) * 10 ** SHARE_DECIMALS))
 
   const run = async () => {
-    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
-    if (mode === 'Buy' && !approved) {
-      setStep('approving')
-      await wait(1200)
-      setApproved(true)
+    const confirm = async (hash: Hex) => (await waitForTransactionReceipt(config, { hash }), hash)
+    const side = outcome === 'YES' ? 0 : 1 // IMarket.Outcome: Yes = 0, No = 1
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECS)
+    try {
+      if (needsApproval) {
+        setStep('approving')
+        await confirm(
+          mode === 'Buy'
+            ? await writeContractAsync({ address: USDC, abi: erc20Abi, functionName: 'approve', args: [marketAddress, amountRaw] })
+            : await writeContractAsync({ address: OUTCOME_TOKEN, abi: outcomeTokenAbi, functionName: 'setApprovalForAll', args: [marketAddress, true] }),
+        )
+      }
+      setStep('confirming')
+      const tx = await confirm(
+        await writeContractAsync({
+          address: marketAddress,
+          abi: marketAbi,
+          functionName: mode === 'Buy' ? 'buy' : 'sell',
+          args: [side, amountRaw, minOut, deadline],
+        }),
+      )
+      setResult({
+        text:
+          mode === 'Buy'
+            ? `Bought ${buy!.shares.toFixed(1)} ${outcome} for ${usdc(amount)} USDC`
+            : `Sold ${amount} ${outcome} for ${usdc(sell!.received)} USDC`,
+        tx,
+      })
+      setStep('done')
+      setInput('')
+    } catch (e) {
+      // A wallet rejection is the user's choice, not an error worth showing.
+      if (e instanceof BaseError && e.walk((x) => x instanceof UserRejectedRequestError)) return setStep('idle')
+      setResult({ text: e instanceof BaseError ? e.shortMessage : e instanceof Error ? e.message : 'Transaction failed' })
+      setStep('failed')
+    } finally {
+      queryClient.invalidateQueries()
     }
-    setStep('confirming')
-    await wait(1400)
-    setResult(
-      mode === 'Buy'
-        ? `Bought ${buy!.shares.toFixed(1)} ${outcome} for ${usdc(amount)} USDC`
-        : `Sold ${amount} ${outcome} for ${usdc(sell!.received)} USDC`,
-    )
-    setStep('done')
-    setInput('')
   }
 
   let action: { label: ReactNode; onClick?: () => void; disabled?: boolean }
@@ -336,9 +391,10 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
   else if (amount <= 0) action = { label: 'Enter an amount', disabled: true }
   else if (mode === 'Buy' && amount > (wallet.usdc ?? 0)) action = { label: 'Not enough USDC', disabled: true }
   else if (mode === 'Sell' && amount > held) action = { label: `You hold ${held} ${outcome}`, disabled: true }
-  else if (step === 'approving') action = { label: <><LoaderCircle size={16} className="animate-spin" /> Approving USDC…</>, disabled: true }
+  else if (step === 'approving')
+    action = { label: <><LoaderCircle size={16} className="animate-spin" /> Approving {mode === 'Buy' ? 'USDC' : 'shares'}…</>, disabled: true }
   else if (step === 'confirming') action = { label: <><LoaderCircle size={16} className="animate-spin" /> Confirm in wallet…</>, disabled: true }
-  else if (mode === 'Buy' && !approved) action = { label: 'Approve USDC, then buy', onClick: run }
+  else if (needsApproval) action = { label: mode === 'Buy' ? 'Approve USDC, then buy' : 'Approve shares, then sell', onClick: run }
   else action = { label: `${mode} ${outcome === 'YES' ? 'Yes' : 'No'}`, onClick: run }
 
   const row = (label: string, value: ReactNode, strong = false) => (
@@ -433,8 +489,12 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
         </div>
       )}
 
-      {mode === 'Buy' && wallet && !approved && amount > 0 && !busy && (
-        <p className="text-xs text-muted">First trade needs two wallet confirmations: approve USDC once, then buy.</p>
+      {wallet && needsApproval && amount > 0 && !busy && (
+        <p className="text-xs text-muted">
+          {mode === 'Buy'
+            ? 'Needs two wallet confirmations: approve this USDC amount, then buy.'
+            : 'First sell in this market needs two confirmations: let the market move your shares, then sell.'}
+        </p>
       )}
 
       <button
@@ -447,10 +507,15 @@ export function TradePanel({ market, outcome, setOutcome, held }: {
 
       {step === 'done' && (
         <p className="flex items-center justify-between rounded-lg bg-yes-soft px-3 py-2 text-sm text-yes">
-          <span className="flex items-center gap-1.5"><Check size={15} /> {result}</span>
-          <a href="https://sepolia.basescan.org/" target="_blank" rel="noreferrer" className="flex items-center gap-0.5 underline-offset-2 hover:underline">
+          <span className="flex items-center gap-1.5"><Check size={15} /> {result.text}</span>
+          <a href={basescanTx(result.tx!)} target="_blank" rel="noreferrer" className="flex items-center gap-0.5 underline-offset-2 hover:underline">
             Basescan <ArrowUpRight size={13} />
           </a>
+        </p>
+      )}
+      {step === 'failed' && (
+        <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-no-soft px-3 py-2 text-sm text-no">
+          <TriangleAlert size={15} className="shrink-0" /> {result.text}
         </p>
       )}
 

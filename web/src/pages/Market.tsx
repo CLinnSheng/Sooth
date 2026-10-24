@@ -43,7 +43,6 @@ export default function Market() {
   const p = priceYes(market)
   // shortcut: no positions until OutcomeToken balances are read; wire them with the Portfolio page.
   const mine: Position[] = []
-  const held = mine.find((x) => x.outcome === outcome)?.shares ?? 0
   const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
 
@@ -94,7 +93,7 @@ export default function Market() {
       </section>
 
       <aside className="lg:sticky lg:top-20 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
-        <TradePanel market={market} outcome={outcome} setOutcome={setOutcome} held={held} />
+        <TradePanel market={market} outcome={outcome} setOutcome={setOutcome} />
       </aside>
 
       <section className="flex flex-col gap-6 lg:col-start-1">
