@@ -12,6 +12,14 @@ export const OUTCOME_TOKEN: Address = '0x7Cf006898087aEB8578137173fF53aA8Fe8996E
 export const factoryAbi = parseAbi([
   'function marketCount() view returns (uint256)',
   'function markets(uint256 marketId) view returns (address)',
+  'function hasRole(bytes32 role, address account) view returns (bool)',
+  'function createMarket((address arbitrator, uint64 closeTime, uint16 initialYesProbabilityBps, string spec, uint256 initialLiquidity) p) returns (uint256 marketId, address market)',
+  'error ZeroArbitrator()',
+  'error CloseTimeInPast(uint64 closeTime, uint256 currentTime)',
+  'error UnsupportedInitialProbability(uint16 initialYesProbabilityBps)',
+  'error LiquidityTooLow(uint256 initialLiquidity, uint256 minLiquidity)',
+  'error EmptySpec()',
+  'error AccessControlUnauthorizedAccount(address account, bytes32 neededRole)',
   'event MarketCreated(uint256 indexed marketId, address indexed market, address indexed creator, address arbitrator, address collateral, uint64 closeTime, bytes32 specHash, string spec, uint256 initialLiquidity)',
 ])
 

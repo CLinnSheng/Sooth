@@ -19,6 +19,7 @@ import { BaseError, UserRejectedRequestError, erc20Abi, formatUnits, parseUnits,
 import { useAccount, useReadContract, useReadContracts, useSwitchChain, useWriteContract } from 'wagmi'
 import { waitForTransactionReceipt } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
+import { useIsAdmin } from './chain'
 import { OUTCOME_TOKEN, USDC, marketAbi, outcomeTokenAbi } from './contracts'
 import {
   FEE,
@@ -53,9 +54,10 @@ const avatar = (address: string) => {
 
 export function Nav() {
   const { wallet } = useWallet()
-  const { isConnecting, isReconnecting } = useAccount()
+  const { isConnecting, isReconnecting, address } = useAccount()
+  const { data: isAdmin } = useIsAdmin(address)
   const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
-  const link = ({ isActive }: { isActive: boolean }) =>
+  const link =({ isActive }: { isActive: boolean }) =>
     `rounded-md px-3 py-1.5 text-sm ${focus} ${isActive ? 'font-medium text-white' : 'text-muted hover:text-white'}`
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-canvas/75 backdrop-blur-xl">
@@ -72,6 +74,11 @@ export function Nav() {
         <NavLink to="/portfolio" className={link}>
           Portfolio
         </NavLink>
+        {isAdmin && (
+          <NavLink to="/admin/create" className={link}>
+            Admin
+          </NavLink>
+        )}
         <ConnectButton.Custom>
           {({ account, chain, mounted, openAccountModal, openConnectModal }) => {
             const connecting = isConnecting || isReconnecting

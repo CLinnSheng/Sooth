@@ -7,6 +7,7 @@ import {
   keccak256,
   parseAbiParameters,
   zeroAddress,
+  zeroHash,
   type Address,
 } from 'viem'
 import { useReadContract } from 'wagmi'
@@ -51,6 +52,18 @@ const blockTimes = new Map<bigint, number>()
 
 export function useMarkets() {
   return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS })
+}
+
+// DEFAULT_ADMIN_ROLE is bytes32(0) in OpenZeppelin AccessControl.
+export function useIsAdmin(account: Address | undefined) {
+  return useReadContract({
+    address: FACTORY,
+    abi: factoryAbi,
+    functionName: 'hasRole',
+    args: [zeroHash, account ?? zeroAddress],
+    chainId: baseSepolia.id,
+    query: { enabled: Boolean(account) },
+  })
 }
 
 // Mirrors OutcomeTokenId.compute: keccak256(abi.encode(marketId, outcome)).
@@ -154,7 +167,7 @@ async function cacheBlockTimes(logs: SoothLog[]) {
 }
 
 // The factory hashes whatever text it is given, so the shape is still checked here before rendering.
-function parseSpec(json: string): Spec | null {
+export function parseSpec(json: string): Spec | null {
   let raw: unknown
   try {
     raw = JSON.parse(json)

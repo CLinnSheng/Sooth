@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router'
 import { Nav } from './components'
 import { WalletProvider } from './wallet'
+import Admin from './pages/Admin'
 import Home from './pages/Home'
 import Market from './pages/Market'
 import Portfolio from './pages/Portfolio'
@@ -15,7 +16,8 @@ export default function App() {
           <Route path="/market/:id" element={<Market />} />
           <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/portfolio/:address" element={<Portfolio />} />
-          <Route path="*" element={<p className="text-zinc-500">Page not found.</p>} />
+          <Route path="/admin/create" element={<Admin />} />
+          <Route path="*"element={<p className="text-zinc-500">Page not found.</p>} />
         </Routes>
       </main>
       {/* <footer className="mx-auto flex max-w-6xl justify-between px-4 pb-8 text-xs text-zinc-400"> */}
