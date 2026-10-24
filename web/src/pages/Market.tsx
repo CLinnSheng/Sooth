@@ -1,27 +1,24 @@
 import { ArrowLeft, ArrowUpRight, ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
+import { useMarkets } from '../chain'
 import { Change, PriceChart, ProbabilityBar, StatusBadge, TradePanel } from '../components'
-import { useWallet } from '../wallet'
 import {
-  MARKET_ADDRESS,
   basescanAddr,
   basescanTx,
   cents,
   change30d,
   compact,
   date,
-  marketById,
   pct,
   positionValue,
-  positions,
   priceOf,
   priceYes,
   shortAddr,
   signed,
-  trades,
   usdc,
   type Outcome,
+  type Position,
 } from '../mock'
 
 const ranges = { '1W': 7, '1M': 30, All: 90 }
@@ -29,11 +26,13 @@ const ranges = { '1W': 7, '1M': 30, All: 90 }
 export default function Market() {
   const { id } = useParams()
   const [params] = useSearchParams()
-  const { wallet } = useWallet()
-  const market = marketById(Number(id))
+  const { data, error } = useMarkets()
   const [outcome, setOutcome] = useState<Outcome>(params.get('outcome') === 'NO' ? 'NO' : 'YES')
   const [range, setRange] = useState<keyof typeof ranges>('1M')
 
+  if (!data) return <p className="text-muted">{error ? 'Could not load market from Base Sepolia.' : 'Loading market…'}</p>
+
+  const market = data.markets.find((m) => m.id === Number(id))
   if (!market)
     return (
       <p className="text-muted">
@@ -42,9 +41,10 @@ export default function Market() {
     )
 
   const p = priceYes(market)
-  const mine = wallet ? positions.filter((x) => x.marketId === market.id) : []
+  // shortcut: no positions until OutcomeToken balances are read; wire them with the Portfolio page.
+  const mine: Position[] = []
   const held = mine.find((x) => x.outcome === outcome)?.shares ?? 0
-  const activity = trades.filter((t) => t.marketId === market.id)
+  const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
 
   return (
@@ -52,12 +52,13 @@ export default function Market() {
       <section className="flex flex-col gap-6">
         <div className="flex flex-col gap-3">
           <Link to="/" className="flex items-center gap-1 text-sm text-muted hover:text-white">
-            <ArrowLeft size={14} /> Explore / {market.category}
+            <ArrowLeft size={14} /> Explore{market.category && ` / ${market.category}`}
           </Link>
           <div><StatusBadge market={market} /></div>
           <h1 className="text-3xl font-bold tracking-tight md:text-4xl">{market.question}</h1>
           <p className="text-sm text-muted">
-            {market.status === 'resolved' ? 'Closed' : 'Closes'} {date(market.closesAt)} · Source: {market.source.label}
+            {market.status === 'open' ? 'Closes' : 'Closed'} {date(market.closesAt)}
+            {market.source && ` · Source: ${market.source.label}`}
           </p>
         </div>
 
@@ -126,11 +127,13 @@ export default function Market() {
           </summary>
           <div className="mt-3 flex flex-col gap-3 text-sm text-zinc-300">
             <p>{market.rules}</p>
-            <a href={market.source.url} target="_blank" rel="noreferrer" className="flex w-fit items-center gap-1 font-medium text-white hover:underline">
-              {market.source.label} <ArrowUpRight size={14} />
-            </a>
-            <a href={basescanAddr(MARKET_ADDRESS)} target="_blank" rel="noreferrer" className="flex w-fit items-center gap-1 text-muted hover:underline">
-              Market contract {shortAddr(MARKET_ADDRESS)} on Basescan <ArrowUpRight size={14} />
+            {market.source && (
+              <a href={market.source.url} target="_blank" rel="noreferrer" className="flex w-fit items-center gap-1 font-medium text-white hover:underline">
+                {market.source.label} <ArrowUpRight size={14} />
+              </a>
+            )}
+            <a href={basescanAddr(market.address)} target="_blank" rel="noreferrer" className="flex w-fit items-center gap-1 text-muted hover:underline">
+              Market contract {shortAddr(market.address)} on Basescan <ArrowUpRight size={14} />
             </a>
           </div>
         </details>
