@@ -1,7 +1,8 @@
 import { ArrowLeft, ArrowUpRight, ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
-import { useMarkets } from '../chain'
+import { useAccount } from 'wagmi'
+import { useMarkets, usePositions } from '../chain'
 import { Change, PriceChart, ProbabilityBar, StatusBadge, TradePanel } from '../components'
 import {
   basescanAddr,
@@ -18,7 +19,6 @@ import {
   signed,
   usdc,
   type Outcome,
-  type Position,
 } from '../mock'
 
 const ranges = { '1W': 7, '1M': 30, All: 90 }
@@ -27,6 +27,8 @@ export default function Market() {
   const { id } = useParams()
   const [params] = useSearchParams()
   const { data, error } = useMarkets()
+  const { address } = useAccount()
+  const positions = usePositions(address)
   const [outcome, setOutcome] = useState<Outcome>(params.get('outcome') === 'NO' ? 'NO' : 'YES')
   const [range, setRange] = useState<keyof typeof ranges>('1M')
 
@@ -41,8 +43,7 @@ export default function Market() {
     )
 
   const p = priceYes(market)
-  // shortcut: no positions until OutcomeToken balances are read; wire them with the Portfolio page.
-  const mine: Position[] = []
+  const mine = positions.filter((pos) => pos.marketId === market.id)
   const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
 

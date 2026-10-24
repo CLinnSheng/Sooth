@@ -1,9 +1,19 @@
 import { useQuery } from '@tanstack/react-query'
-import { formatUnits, getAbiItem, type Address } from 'viem'
+import {
+  encodeAbiParameters,
+  formatUnits,
+  getAbiItem,
+  hexToBigInt,
+  keccak256,
+  parseAbiParameters,
+  zeroAddress,
+  type Address,
+} from 'viem'
+import { useReadContract } from 'wagmi'
 import { getPublicClient } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
-import { DEPLOY_BLOCK, FACTORY, factoryAbi, marketAbi } from './contracts'
-import { categories, type Category, type Market, type Trade } from './mock'
+import { DEPLOY_BLOCK, FACTORY, OUTCOME_TOKEN, factoryAbi, marketAbi, outcomeTokenAbi } from './contracts'
+import { categories, type Category, type Market, type Outcome, type Position, type Trade } from './mock'
 import { config } from './wagmi'
 
 const client = getPublicClient(config, { chainId: baseSepolia.id })
@@ -14,6 +24,8 @@ const REFETCH_MS = 30_000
 const DAY_SECS = 86_400
 const STATE_OPEN = 0
 const OUTCOME_YES = 0
+const OUTCOME_NO = 1
+const OUTCOMES: Outcome[] = ['YES', 'NO']
 // The factory only seeds equal pools, so every market opens at 50/50.
 const OPENING_PRICE = 0.5
 const INVALID_SPEC_RULES = 'This market was created with a spec that is not in the expected format.'
@@ -41,6 +53,35 @@ const blockTimes = new Map<bigint, number>()
 
 export function useMarkets() {
   return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS })
+}
+
+// Mirrors OutcomeTokenId.compute: keccak256(abi.encode(marketId, outcome)).
+const tokenId = (marketId: number, outcome: Outcome) =>
+  hexToBigInt(
+    keccak256(encodeAbiParameters(parseAbiParameters('uint256, uint8'), [BigInt(marketId), outcome === 'YES' ? OUTCOME_YES : OUTCOME_NO])),
+  )
+
+export function usePositions(owner: Address | undefined): Position[] {
+  const { data } = useMarkets()
+  const keys = (data?.markets ?? []).flatMap((m) => OUTCOMES.map((outcome) => ({ marketId: m.id, outcome })))
+  const { data: balances } = useReadContract({
+    address: OUTCOME_TOKEN,
+    abi: outcomeTokenAbi,
+    functionName: 'balanceOfBatch',
+    args: [keys.map(() => owner ?? zeroAddress), keys.map((k) => tokenId(k.marketId, k.outcome))],
+    query: { enabled: Boolean(owner && keys.length) },
+  })
+  if (!data || !balances || !owner) return []
+  return keys.flatMap((key, i) => {
+    if (balances[i] === 0n) return []
+    const buys = data.trades.filter(
+      (t) => t.marketId === key.marketId && t.outcome === key.outcome && t.side === 'Buy' && t.trader.toLowerCase() === owner.toLowerCase(),
+    )
+    const cost = buys.reduce((sum, t) => sum + t.amount, 0)
+    const bought = buys.reduce((sum, t) => sum + t.shares, 0)
+    // Average cost over every buy; sells don't move it, so PnL is the gain on what's still held.
+    return [{ ...key, shares: toUnits(balances[i]), avgPrice: bought > 0 ? cost / bought : 0 }]
+  })
 }
 
 async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
