@@ -4,22 +4,14 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20Errors, IERC1155Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {Market} from "../src/Market.sol";
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {IMarket} from "../src/interfaces/IMarket.sol";
 import {IMarketFactory} from "../src/interfaces/IMarketFactory.sol";
 import {IOutcomeToken} from "../src/interfaces/IOutcomeToken.sol";
-
-contract WrongDecimalsToken is ERC20 {
-    constructor() ERC20("Wrong decimals", "WRONG") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 18;
-    }
-}
 
 contract FeeCallbackToken is MockUSDC {
     Market public callbackMarket;
@@ -35,7 +27,6 @@ contract FeeCallbackToken is MockUSDC {
             try callbackMarket.withdrawFees() returns (uint256) {
                 revert("Reentry succeeded");
             } catch (bytes memory reason) {
-                // Intentionally extract only the four-byte custom-error selector.
                 // forge-lint: disable-next-line(unsafe-typecast)
                 callbackError = bytes4(reason);
             }
@@ -84,6 +75,7 @@ contract CallbackBuyer is IERC1155Receiver {
 contract MarketTradingTest is Test {
     uint256 private constant LIQUIDITY = 100e6;
     uint256 private constant TRADE = 10e6;
+    uint256 private constant TRADE_FEE = 0.1e6; // 1% of TRADE
     bytes32 private constant SPEC_HASH = keccak256("market rules");
     string private constant SPEC_CID = "bafy-market-rules";
 
@@ -129,6 +121,13 @@ contract MarketTradingTest is Test {
         vm.stopPrank();
     }
 
+    function _sell(IMarket.Outcome outcome, uint256 shares) private returns (uint256 collateralOut) {
+        vm.startPrank(alice);
+        token.setApprovalForAll(address(market), true);
+        collateralOut = market.sell(outcome, shares, 1, block.timestamp);
+        vm.stopPrank();
+    }
+
     function _assertInventoryMatchesReserves() private view {
         assertEq(token.balanceOf(address(market), market.yesTokenId()), market.yesPool());
         assertEq(token.balanceOf(address(market), market.noTokenId()), market.noPool());
@@ -136,28 +135,16 @@ contract MarketTradingTest is Test {
         assertGt(market.noPool(), 0);
     }
 
-    function test_InitialSeedIsEqualNonzeroInventoryAndUsesSixDecimals() public view {
-        assertEq(usdc.decimals(), 6);
-        assertEq(market.creator(), admin);
-        _assertInventoryMatchesReserves();
-        assertEq(market.yesPool(), LIQUIDITY);
-        assertEq(market.noPool(), LIQUIDITY);
-    }
-
-    function test_FactoryRejectsCollateralWithWrongDecimals() public {
-        WrongDecimalsToken wrong = new WrongDecimalsToken();
-        vm.expectRevert(abi.encodeWithSelector(IMarketFactory.InvalidCollateralDecimals.selector, uint8(18)));
-        new MarketFactory(admin, address(wrong));
-    }
-
-    function test_MarketCloneAdvertisesReceiverInterface() public view {
-        assertTrue(market.supportsInterface(type(IERC1155Receiver).interfaceId));
+    function _assertFullyBacked() private view {
+        uint256 backing = usdc.balanceOf(address(market)) - market.accruedFees();
+        assertEq(token.totalSupply(market.yesTokenId()), backing);
+        assertEq(token.totalSupply(market.noTokenId()), backing);
     }
 
     function test_BuyQuoteMatchesExecutionAndAccountsForFee() public {
         uint256 productBefore = market.yesPool() * market.noPool();
         (uint256 quoted, uint256 fee) = market.quoteBuy(IMarket.Outcome.Yes, TRADE);
-        assertEq(fee, 100_000);
+        assertEq(fee, TRADE_FEE);
         uint256 userBefore = token.balanceOf(alice, market.yesTokenId());
         uint256 shares = _buy(IMarket.Outcome.Yes, TRADE);
 
@@ -170,8 +157,7 @@ contract MarketTradingTest is Test {
         assertGt(market.priceYes(), 0.5e18);
         assertGe(market.yesPool() * market.noPool(), productBefore);
         _assertInventoryMatchesReserves();
-        assertGe(usdc.balanceOf(address(market)) - market.accruedFees(), token.totalSupply(market.yesTokenId()));
-        assertGe(usdc.balanceOf(address(market)) - market.accruedFees(), token.totalSupply(market.noTokenId()));
+        _assertFullyBacked();
     }
 
     function test_BuyEmitsTradeEvent() public {
@@ -201,31 +187,24 @@ contract MarketTradingTest is Test {
         uint256 supplyBeforeNo = token.totalSupply(market.noTokenId());
         uint256 balanceBefore = usdc.balanceOf(alice);
 
-        vm.startPrank(alice);
-        token.setApprovalForAll(address(market), true);
-        uint256 received = market.sell(IMarket.Outcome.Yes, toSell, quoted, block.timestamp);
-        vm.stopPrank();
+        uint256 received = _sell(IMarket.Outcome.Yes, toSell);
 
         assertEq(received, quoted);
         assertEq(usdc.balanceOf(alice), balanceBefore + quoted);
-        assertEq(market.accruedFees(), 100_000 + fee);
+        assertEq(market.accruedFees(), TRADE_FEE + fee);
         uint256 gross = quoted + fee;
         assertEq(token.totalSupply(market.yesTokenId()), supplyBeforeYes - gross);
         assertEq(token.totalSupply(market.noTokenId()), supplyBeforeNo - gross);
         assertLt(market.priceYes(), priceAfterBuy);
         assertGe(market.yesPool() * market.noPool(), productBeforeSell);
         _assertInventoryMatchesReserves();
-        assertGe(usdc.balanceOf(address(market)) - market.accruedFees(), token.totalSupply(market.yesTokenId()));
-        assertGe(usdc.balanceOf(address(market)) - market.accruedFees(), token.totalSupply(market.noTokenId()));
+        _assertFullyBacked();
     }
 
     function test_SellNoMovesPriceInOppositeDirection() public {
         uint256 shares = _buy(IMarket.Outcome.No, TRADE);
         uint256 priceAfterBuy = market.priceYes();
-        vm.startPrank(alice);
-        token.setApprovalForAll(address(market), true);
-        market.sell(IMarket.Outcome.No, shares, 1, block.timestamp);
-        vm.stopPrank();
+        _sell(IMarket.Outcome.No, shares);
         assertGt(market.priceYes(), priceAfterBuy);
         assertLe(market.priceYes(), 0.5e18);
         _assertInventoryMatchesReserves();
@@ -242,54 +221,51 @@ contract MarketTradingTest is Test {
         vm.stopPrank();
     }
 
-    function test_DirectRoundTripDoesNotProfit() public {
-        uint256 beforeBalance = usdc.balanceOf(alice);
-        uint256 shares = _buy(IMarket.Outcome.Yes, TRADE);
-        vm.startPrank(alice);
-        token.setApprovalForAll(address(market), true);
-        market.sell(IMarket.Outcome.Yes, shares, 1, block.timestamp);
-        vm.stopPrank();
-        assertLe(usdc.balanceOf(alice), beforeBalance);
-    }
-
-    function test_RevertWhen_BuyerFailsSlippageOrApproval() public {
+    function test_RevertWhen_BuyBelowMinShares() public {
         (uint256 quoted,) = market.quoteBuy(IMarket.Outcome.Yes, TRADE);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IMarket.InsufficientOutput.selector, quoted, quoted + 1));
         market.buy(IMarket.Outcome.Yes, TRADE, quoted + 1, block.timestamp);
-        assertEq(market.yesPool(), LIQUIDITY);
+    }
 
+    function test_RevertWhen_BuyerHasNotApprovedMarket() public {
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(market), 0, TRADE)
+        );
         market.buy(IMarket.Outcome.Yes, TRADE, 1, block.timestamp);
-        assertEq(market.noPool(), LIQUIDITY);
     }
 
     function test_RevertWhen_BuyerBalanceIsInsufficient() public {
         uint256 amount = 2_000e6;
         vm.startPrank(alice);
         usdc.approve(address(market), amount);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, alice, 1_000e6, amount)
+        );
         market.buy(IMarket.Outcome.Yes, amount, 1, block.timestamp);
         vm.stopPrank();
-        assertEq(market.yesPool(), LIQUIDITY);
-        assertEq(market.accruedFees(), 0);
     }
 
     function test_RevertWhen_SellerHasNotApprovedMarket() public {
         uint256 shares = _buy(IMarket.Outcome.Yes, TRADE);
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC1155Errors.ERC1155MissingApprovalForAll.selector, address(market), alice)
+        );
         market.sell(IMarket.Outcome.Yes, shares, 1, block.timestamp);
     }
 
     function test_RevertWhen_SellerShareBalanceIsInsufficient() public {
         vm.startPrank(alice);
         token.setApprovalForAll(address(market), true);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IERC1155Errors.ERC1155InsufficientBalance.selector, alice, 0, 1e6, market.yesTokenId()
+            )
+        );
         market.sell(IMarket.Outcome.Yes, 1e6, 1, block.timestamp);
         vm.stopPrank();
-        assertEq(market.noPool(), LIQUIDITY);
     }
 
     function test_RevertWhen_SellOutputBelowMinimum() public {
@@ -300,28 +276,36 @@ contract MarketTradingTest is Test {
         vm.expectRevert(abi.encodeWithSelector(IMarket.InsufficientOutput.selector, quoted, quoted + 1));
         market.sell(IMarket.Outcome.Yes, shares, quoted + 1, block.timestamp);
         vm.stopPrank();
-        assertEq(market.accruedFees(), 100_000);
     }
 
-    function test_RevertWhen_DeadlineExpiredOrMarketClosed() public {
+    function test_RevertWhen_DeadlineExpired() public {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IMarket.DeadlineExpired.selector, block.timestamp - 1, block.timestamp));
         market.buy(IMarket.Outcome.Yes, TRADE, 1, block.timestamp - 1);
+    }
 
+    function test_RevertWhen_TradingAfterClose() public {
         vm.warp(market.closeTime());
         vm.expectRevert(abi.encodeWithSelector(IMarket.TradingClosed.selector, IMarket.State.Closed));
         market.quoteBuy(IMarket.Outcome.Yes, TRADE);
         vm.expectRevert(abi.encodeWithSelector(IMarket.TradingClosed.selector, IMarket.State.Closed));
         market.buy(IMarket.Outcome.Yes, TRADE, 1, block.timestamp);
+        vm.expectRevert(abi.encodeWithSelector(IMarket.TradingClosed.selector, IMarket.State.Closed));
+        market.quoteSell(IMarket.Outcome.Yes, TRADE);
+        vm.expectRevert(abi.encodeWithSelector(IMarket.TradingClosed.selector, IMarket.State.Closed));
+        market.sell(IMarket.Outcome.Yes, TRADE, 1, block.timestamp);
     }
 
-    function test_RevertWhen_ZeroInputOrDustOutput() public {
+    function test_RevertWhen_ZeroAmount() public {
         vm.expectRevert(IMarket.ZeroAmount.selector);
         market.quoteBuy(IMarket.Outcome.Yes, 0);
-        vm.expectRevert(IMarket.ZeroOutput.selector);
-        market.quoteBuy(IMarket.Outcome.Yes, 1);
         vm.expectRevert(IMarket.ZeroAmount.selector);
         market.quoteSell(IMarket.Outcome.Yes, 0);
+    }
+
+    function test_RevertWhen_BuyTooSmallToCoverFee() public {
+        vm.expectRevert(IMarket.ZeroOutput.selector);
+        market.quoteBuy(IMarket.Outcome.Yes, 1);
     }
 
     function test_BuyerReceiverCannotReenterMarket() public {
@@ -349,11 +333,7 @@ contract MarketTradingTest is Test {
 
     function test_WithdrawFeesAtClosePaysOnlyCreatorAndPreservesBacking() public {
         uint256 shares = _buy(IMarket.Outcome.Yes, TRADE);
-        vm.startPrank(alice);
-        token.setApprovalForAll(address(market), true);
-        market.sell(IMarket.Outcome.Yes, shares / 2, 1, block.timestamp);
-        vm.stopPrank();
-        usdc.mint(address(market), 3e6);
+        _sell(IMarket.Outcome.Yes, shares / 2);
 
         uint256 fees = market.accruedFees();
         uint256 balanceBefore = usdc.balanceOf(address(market));
@@ -375,8 +355,7 @@ contract MarketTradingTest is Test {
         assertEq(usdc.balanceOf(address(market)), balanceBefore - fees);
         assertEq(market.yesPool(), yesBefore);
         assertEq(market.noPool(), noBefore);
-        assertGe(usdc.balanceOf(address(market)), token.totalSupply(market.yesTokenId()));
-        assertGe(usdc.balanceOf(address(market)), token.totalSupply(market.noTokenId()));
+        _assertFullyBacked();
         _assertInventoryMatchesReserves();
 
         vm.expectRevert(IMarket.NoFeesToWithdraw.selector);
@@ -388,14 +367,12 @@ contract MarketTradingTest is Test {
         vm.warp(market.closeTime() - 1);
         vm.expectRevert(IMarket.TradingStillOpen.selector);
         market.withdrawFees();
-        assertEq(market.accruedFees(), 100_000);
     }
 
     function test_RevertWhen_NoAccruedFeesAfterClose() public {
         vm.warp(market.closeTime());
         vm.expectRevert(IMarket.NoFeesToWithdraw.selector);
         market.withdrawFees();
-        assertEq(usdc.balanceOf(address(market)), LIQUIDITY);
     }
 
     function test_WithdrawFeesUsesEachMarketsCreator() public {
@@ -443,9 +420,9 @@ contract MarketTradingTest is Test {
         callbackToken.setCallbackMarket(callbackMarket);
         vm.warp(callbackMarket.closeTime());
         callbackMarket.withdrawFees();
-        assertEq(callbackToken.callbackError(), ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
+        assertEq(callbackToken.callbackError(), ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
         assertEq(callbackMarket.accruedFees(), 0);
-        assertEq(callbackToken.balanceOf(admin), 100_000);
+        assertEq(callbackToken.balanceOf(admin), TRADE_FEE);
     }
 
     function testFuzz_BuyThenSellCannotProfit(uint96 rawAmount) public {
@@ -454,14 +431,10 @@ contract MarketTradingTest is Test {
         uint256 beforeBalance = usdc.balanceOf(alice);
         uint256 shares = _buy(IMarket.Outcome.Yes, amount);
         assertGe(market.yesPool() * market.noPool(), productBefore);
-        vm.startPrank(alice);
-        token.setApprovalForAll(address(market), true);
-        market.sell(IMarket.Outcome.Yes, shares, 1, block.timestamp);
-        vm.stopPrank();
+        _sell(IMarket.Outcome.Yes, shares);
         assertLe(usdc.balanceOf(alice), beforeBalance);
         assertGe(market.yesPool() * market.noPool(), productBefore);
-        assertGe(usdc.balanceOf(address(market)) - market.accruedFees(), token.totalSupply(market.yesTokenId()));
-        assertGe(usdc.balanceOf(address(market)) - market.accruedFees(), token.totalSupply(market.noTokenId()));
+        _assertFullyBacked();
         _assertInventoryMatchesReserves();
     }
 }

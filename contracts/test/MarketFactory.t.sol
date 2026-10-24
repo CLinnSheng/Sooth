@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {MarketFactory} from "../src/MarketFactory.sol";
 import {Market} from "../src/Market.sol";
@@ -13,6 +14,14 @@ import {IMarketFactory} from "../src/interfaces/IMarketFactory.sol";
 import {IMarket} from "../src/interfaces/IMarket.sol";
 import {IOutcomeToken} from "../src/interfaces/IOutcomeToken.sol";
 import {OutcomeTokenId} from "../src/libraries/OutcomeTokenId.sol";
+
+contract WrongDecimalsToken is ERC20 {
+    constructor() ERC20("Wrong decimals", "WRONG") {}
+
+    function decimals() public pure override returns (uint8) {
+        return 18;
+    }
+}
 
 contract MarketFactoryTest is Test {
     uint256 constant MIN_LIQUIDITY = 10e6; // 10 mUSDC, must match MarketFactory.MIN_LIQUIDITY
@@ -259,6 +268,12 @@ contract MarketFactoryTest is Test {
         new MarketFactory(admin, address(0));
     }
 
+    function test_RevertWhen_CollateralDecimalsNotSix() public {
+        WrongDecimalsToken wrong = new WrongDecimalsToken();
+        vm.expectRevert(abi.encodeWithSelector(IMarketFactory.InvalidCollateralDecimals.selector, uint8(18)));
+        new MarketFactory(admin, address(wrong));
+    }
+
     // ---------------------------------------------------------------
     // State machine
     // ---------------------------------------------------------------
@@ -416,7 +431,7 @@ contract MarketFactoryTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // Fuzz: collateral invariant at creation (E8-4)
+    // Fuzz: collateral invariant at creation
     // ---------------------------------------------------------------
 
     function testFuzz_CreateMarket_FullyCollateralized(uint64 closeOffset, uint256 liquidity) public {
