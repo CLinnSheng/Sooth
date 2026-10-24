@@ -6,6 +6,8 @@ export const FACTORY: Address = '0x4ed36D2736bE22816bb78ba475C10f01Fa3E4Db6'
 export const USDC: Address = '0x5f29331BBBA6f605942f5de0B217359F3C7B7c51'
 // Factory deploy block: log scans start here, nothing older can belong to Sooth.
 export const DEPLOY_BLOCK = 49_630_367n
+// Deployed by the factory constructor: one ERC-1155 holds every market's YES/NO shares.
+export const OUTCOME_TOKEN: Address = '0x7Cf006898087aEB8578137173fF53aA8Fe8996E8'
 
 export const factoryAbi = parseAbi([
   'function marketCount() view returns (uint256)',
@@ -15,6 +17,8 @@ export const factoryAbi = parseAbi([
 
 // Outcome: 0 = Yes, 1 = No. State: 0 Open, 1 Closed, 2 Proposed, 3 Resolved, 4 Cancelled.
 export const marketAbi = parseAbi([
+  'function yesTokenId() view returns (uint256)',
+  'function noTokenId() view returns (uint256)',
   'function yesPool() view returns (uint256)',
   'function noPool() view returns (uint256)',
   'function closeTime() view returns (uint64)',
@@ -25,4 +29,13 @@ export const marketAbi = parseAbi([
   'function sell(uint8 outcome, uint256 sharesIn, uint256 minCollateralOut, uint256 deadline) returns (uint256 collateralOut)',
   'event Bought(address indexed trader, uint8 indexed outcome, uint256 collateralIn, uint256 sharesOut, uint256 fee)',
   'event Sold(address indexed trader, uint8 indexed outcome, uint256 sharesIn, uint256 collateralOut, uint256 fee)',
+  'error InsufficientOutput(uint256 actual, uint256 minimum)',
+  'error TradingClosed(uint8 currentState)',
+  'error DeadlineExpired(uint256 deadline, uint256 currentTime)',
+])
+
+export const outcomeTokenAbi = parseAbi([
+  'function balanceOf(address account, uint256 id) view returns (uint256)',
+  'function isApprovedForAll(address account, address operator) view returns (bool)',
+  'function setApprovalForAll(address operator, bool approved)',
 ])
