@@ -1,11 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ooth",
+  "name": "sooth",
   "compatibility_date": "2026-10-19",
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": "./web/dist"
+    "directory": "./web/dist",
+    "not_found_handling": "single-page-application"
   }
 }
