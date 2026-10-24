@@ -29,6 +29,7 @@ contract OutcomeToken is ERC1155Supply, IOutcomeToken {
 
         uint256 yesId = OutcomeTokenId.compute(marketId, IMarket.Outcome.Yes);
         uint256 noId = OutcomeTokenId.compute(marketId, IMarket.Outcome.No);
+        // YES and NO are always registered together, so checking YES covers both.
         if (marketOf[yesId] != address(0)) revert MarketAlreadyRegistered(marketId);
 
         marketOf[yesId] = market;
