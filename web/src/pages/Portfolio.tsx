@@ -35,11 +35,13 @@ export default function Portfolio() {
   if (!data) return <p className="text-muted">Loading portfolio…</p>
 
   const marketById = (id: number) => data.markets.find((m) => m.id === id)!
-  const rows = positions.map((p) => {
-    const m = marketById(p.marketId)
-    const value = positionValue(p, m)
-    return { p, m, value, pnl: value - p.shares * p.avgPrice }
-  })
+  const rows = positions
+    .map((p) => {
+      const m = marketById(p.marketId)
+      const value = positionValue(p, m)
+      return { p, m, value, pnl: value - p.shares * p.avgPrice }
+    })
+    .toSorted((a, b) => b.value - a.value)
   const total = rows.reduce((s, r) => s + r.value, 0)
   const pnl = rows.reduce((s, r) => s + r.pnl, 0)
   const cost = rows.reduce((s, r) => s + r.p.shares * r.p.avgPrice, 0)
