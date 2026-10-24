@@ -27,7 +27,6 @@ interface IMarket {
         uint256 marketId;
         address creator;
         address arbitrator;
-        address collateral;
         uint64 closeTime;
         bytes32 specHash;
         uint256 initialLiquidity;

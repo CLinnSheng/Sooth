@@ -198,7 +198,7 @@ contract MarketFactoryTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // Validation (E1-2)
+    // Validation
     // ---------------------------------------------------------------
 
     function test_RevertWhen_ArbitratorIsZero() public {
@@ -260,7 +260,7 @@ contract MarketFactoryTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // State machine (E1-3)
+    // State machine
     // ---------------------------------------------------------------
 
     function test_State_ClosedIsDerivedFromCloseTime() public {
@@ -319,7 +319,6 @@ contract MarketFactoryTest is Test {
             marketId: 99,
             creator: admin,
             arbitrator: arbitrator,
-            collateral: address(usdc),
             closeTime: uint64(block.timestamp + 7 days),
             specHash: SPEC_HASH,
             initialLiquidity: LIQUIDITY

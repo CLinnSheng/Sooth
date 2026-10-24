@@ -44,7 +44,7 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
         OutcomeToken token = new OutcomeToken(address(this));
         outcomeToken = token;
 
-        implementation = address(new Market(address(this), token));
+        implementation = address(new Market(address(this), token, collateral));
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }
@@ -71,7 +71,6 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
                     marketId: marketId,
                     creator: msg.sender,
                     arbitrator: p.arbitrator,
-                    collateral: address(collateral),
                     closeTime: p.closeTime,
                     specHash: p.specHash,
                     initialLiquidity: p.initialLiquidity
@@ -92,7 +91,7 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
     }
 
     function _validate(CreateParams calldata p) internal view {
-        // The arbitrator may be the creator (Q4); the risk is documented in the threat model.
+        // The arbitrator may be the creator; the risk is documented in the threat model.
         if (p.arbitrator == address(0)) revert ZeroArbitrator();
 
         // A market closing at or before now would start Closed with its seed liquidity locked.
