@@ -3,11 +3,14 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useWallet } from '../wallet'
 import { useAccount } from 'wagmi'
-import { basescanTx, cents, date, marketById, positionValue, positions, priceOf, signed, trades, usdc } from '../mock'
+import { useMarkets, usePositions } from '../chain'
+import { basescanTx, cents, date, positionValue, priceOf, signed, usdc } from '../mock'
 
 export default function Portfolio() {
   const { wallet, connect } = useWallet()
-  const { isConnecting, isReconnecting } = useAccount()
+  const { address, isConnecting, isReconnecting } = useAccount()
+  const { data } = useMarkets()
+  const positions = usePositions(address)
   const connecting = isConnecting || isReconnecting
   const [tab, setTab] = useState<'Positions' | 'History'>('Positions')
 
@@ -27,15 +30,18 @@ export default function Portfolio() {
       </div>
     )
 
+  if (!data) return <p className="text-muted">Loading portfolio…</p>
+
+  const marketById = (id: number) => data.markets.find((m) => m.id === id)!
   const rows = positions.map((p) => {
-    const m = marketById(p.marketId)!
+    const m = marketById(p.marketId)
     const value = positionValue(p, m)
     return { p, m, value, pnl: value - p.shares * p.avgPrice }
   })
   const total = rows.reduce((s, r) => s + r.value, 0)
   const pnl = rows.reduce((s, r) => s + r.pnl, 0)
   const cost = rows.reduce((s, r) => s + r.p.shares * r.p.avgPrice, 0)
-  const history = trades.filter((t) => t.trader === wallet.address)
+  const history = data.trades.filter((t) => t.trader.toLowerCase() === wallet.address.toLowerCase()).toReversed()
 
   const stat = (label: string, value: ReactNode, extra?: ReactNode) => (
     <div className="flex flex-col gap-1 rounded-3xl bg-surface p-5">
@@ -53,7 +59,7 @@ export default function Portfolio() {
         {stat(
           'Profit / loss',
           <span className={pnl >= 0 ? 'text-yes' : 'text-no'}>{signed(pnl)}</span>,
-          <span className="text-xs text-muted">{((pnl / cost) * 100).toFixed(1)}% on {usdc(cost)} USDC cost</span>,
+          cost > 0 && <span className="text-xs text-muted">{((pnl / cost) * 100).toFixed(1)}% on {usdc(cost)} USDC cost</span>,
         )}
         {stat(
           'Cash',
@@ -93,7 +99,7 @@ export default function Portfolio() {
                 <tr key={`${p.marketId}-${p.outcome}`}>
                   <td className="max-w-xs p-4"><Link to={`/market/${m.id}`} className="hover:underline">{m.question}</Link></td>
                   <td className={`p-4 ${p.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{p.outcome}</td>
-                  <td className="p-4 text-right">{p.shares}</td>
+                  <td className="p-4 text-right">{usdc(p.shares)}</td>
                   <td className="p-4 text-right">{cents(p.avgPrice)}</td>
                   <td className="p-4 text-right">
                     {m.status === 'resolved' ? <span className="text-xs text-muted">Resolved {m.resolvedOutcome}</span> : cents(priceOf(m, p.outcome))}
@@ -129,8 +135,8 @@ export default function Portfolio() {
                 <tr key={t.tx}>
                   <td className="p-4 text-muted">{date(t.at)}</td>
                   <td className={`p-4 ${t.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{t.side} {t.outcome}</td>
-                  <td className="max-w-xs p-4"><Link to={`/market/${t.marketId}`} className="hover:underline">{marketById(t.marketId)!.question}</Link></td>
-                  <td className="p-4 text-right">{t.shares}</td>
+                  <td className="max-w-xs p-4"><Link to={`/market/${t.marketId}`} className="hover:underline">{marketById(t.marketId).question}</Link></td>
+                  <td className="p-4 text-right">{usdc(t.shares)}</td>
                   <td className="p-4 text-right">{usdc(t.amount)} USDC</td>
                   <td className="p-4">
                     <a href={basescanTx(t.tx)} target="_blank" rel="noreferrer" aria-label="View transaction" className="text-muted hover:text-white">
