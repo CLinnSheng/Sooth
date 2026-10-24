@@ -7,7 +7,7 @@ import {
   trustWallet,
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets'
-import { http } from 'viem'
+import { fallback, http } from 'viem'
 import { baseSepolia } from 'wagmi/chains'
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID?.trim()
@@ -33,7 +33,9 @@ export const config = getDefaultConfig({
   chains: [baseSepolia],
   multiInjectedProviderDiscovery: true,
   transports: {
-    [baseSepolia.id]: http(),
+    // sepolia.base.org caps eth_getLogs at 200 blocks; publicnode allows 50k. batch packs the
+    // per-market reads into one HTTP request. Falls back to the default RPC for plain reads.
+    [baseSepolia.id]: fallback([http('https://base-sepolia-rpc.publicnode.com', { batch: true }), http()]),
   },
   wallets,
 })
