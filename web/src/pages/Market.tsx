@@ -160,7 +160,9 @@ export default function Market() {
                   key={`${t.tx}-${i}`}
                   className="grid grid-cols-[6.5rem_4.5rem_1fr_4.5rem_1rem] items-center gap-3 whitespace-nowrap py-2 tabular-nums sm:grid-cols-[6.5rem_4.5rem_4.5rem_3.5rem_1fr_4.5rem_1rem]"
                 >
-                  <span className="text-muted">{shortAddr(t.trader)}</span>
+                  <Link to={`/portfolio/${t.trader}`} className="text-muted hover:text-white hover:underline">
+                    {shortAddr(t.trader)}
+                  </Link>
                   <span className={t.outcome === 'YES' ? 'text-yes' : 'text-no'}>{t.side} {t.outcome}</span>
                   <span className="hidden text-right text-muted sm:block">{usdc(t.shares)}</span>
                   <span className="hidden text-muted sm:block">@ {cents(t.amount / t.shares)}</span>
