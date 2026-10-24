@@ -35,7 +35,7 @@ export type Trade = {
   tx: string
 }
 
-export const FEE = 0.005
+export const FEE = 0.01 // Market.FEE_BPS = 100
 export const MARKET_ADDRESS = '0x8B2a4f1C93e0d5B7A6c2E9f04D31b8C5aE07D17F'
 export const WALLET = { address: '0x71C7656EC7ab88b098defB751B7401B5f6d89A42', usdc: 250 }
 
