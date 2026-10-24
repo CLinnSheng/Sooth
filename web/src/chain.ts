@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { formatUnits, getAbiItem, keccak256, type Address, type Hex } from 'viem'
+import { formatUnits, getAbiItem, type Address } from 'viem'
 import { getPublicClient } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
 import { DEPLOY_BLOCK, FACTORY, factoryAbi, marketAbi } from './contracts'
@@ -10,16 +10,13 @@ const client = getPublicClient(config, { chainId: baseSepolia.id })
 
 // publicnode caps eth_getLogs at 50k blocks, about 1.2 days of Base blocks.
 const MAX_LOG_RANGE = 50_000n
-const IPFS_GATEWAYS = ['https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/']
-const SPEC_TIMEOUT_MS = 8_000
 const REFETCH_MS = 30_000
 const DAY_SECS = 86_400
 const STATE_OPEN = 0
 const OUTCOME_YES = 0
 // The factory only seeds equal pools, so every market opens at 50/50.
 const OPENING_PRICE = 0.5
-const UNVERIFIED_RULES =
-  'The rules file for this market could not be fetched, or it does not match the hash committed on-chain.'
+const INVALID_SPEC_RULES = 'This market was created with a spec that is not in the expected format.'
 
 const soothEvents = [
   getAbiItem({ abi: factoryAbi, name: 'MarketCreated' }),
@@ -41,9 +38,6 @@ const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
 // from a reorg stay cached until reload. Move to an indexer (Ponder) once first load gets slow.
 const scan: { toBlock: bigint; logs: SoothLog[] } = { toBlock: DEPLOY_BLOCK - 1n, logs: [] }
 const blockTimes = new Map<bigint, number>()
-// Keyed by specHash, so an entry never goes stale. Failures are cached too, until reload,
-// so a dead CID doesn't stall every refetch on gateway timeouts.
-const specs = new Map<Hex, Spec | null>()
 
 export function useMarkets() {
   return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS })
@@ -72,30 +66,26 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
     else tradeLogs.push(log)
   }
 
-  const markets = await Promise.all(
-    states.map(async (state, i) => {
-      const id = i + 1
-      const createdLog = created.get(id)
-      if (!createdLog) throw new Error(`MarketCreated log missing for market ${id}`)
-      const spec = await fetchSpec(createdLog.args.specCID, state.specHash)
-      const logs = tradeLogs.filter((log) => idByAddress.get(log.address.toLowerCase()) === id)
-      return toMarket(id, state, createdLog, logs, spec)
-    }),
-  )
+  const markets = states.map((state, i) => {
+    const id = i + 1
+    const createdLog = created.get(id)
+    if (!createdLog) throw new Error(`MarketCreated log missing for market ${id}`)
+    const logs = tradeLogs.filter((log) => idByAddress.get(log.address.toLowerCase()) === id)
+    return toMarket(id, state, createdLog, logs, parseSpec(createdLog.args.spec))
+  })
   const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
   return { markets, trades }
 }
 
 async function readMarket(address: Address, blockNumber: bigint) {
   const call = { address, abi: marketAbi, blockNumber } as const
-  const [yesPool, noPool, closeTime, state, specHash] = await Promise.all([
+  const [yesPool, noPool, closeTime, state] = await Promise.all([
     client.readContract({ ...call, functionName: 'yesPool' }),
     client.readContract({ ...call, functionName: 'noPool' }),
     client.readContract({ ...call, functionName: 'closeTime' }),
     client.readContract({ ...call, functionName: 'state' }),
-    client.readContract({ ...call, functionName: 'specHash' }),
   ])
-  return { address, yesPool, noPool, closeTime, state, specHash }
+  return { address, yesPool, noPool, closeTime, state }
 }
 
 // Scans only blocks not seen before. A market created after the last scan has no earlier trades,
@@ -124,27 +114,14 @@ async function cacheBlockTimes(logs: SoothLog[]) {
   for (const block of blocks) blockTimes.set(block.number, Number(block.timestamp))
 }
 
-async function fetchSpec(cid: string, specHash: Hex): Promise<Spec | null> {
-  if (specs.has(specHash)) return specs.get(specHash)!
-  let spec: Spec | null = null
-  for (const gateway of IPFS_GATEWAYS) {
-    try {
-      const res = await fetch(gateway + cid, { signal: AbortSignal.timeout(SPEC_TIMEOUT_MS) })
-      if (!res.ok) continue
-      const bytes = new Uint8Array(await res.arrayBuffer())
-      // Gateways are untrusted: only bytes matching the on-chain hash are the committed rules.
-      if (keccak256(bytes) !== specHash) continue
-      spec = parseSpec(JSON.parse(new TextDecoder().decode(bytes)))
-      break
-    } catch {
-      // Timeout, network error or invalid JSON: try the next gateway.
-    }
+// The factory hashes whatever text it is given, so the shape is still checked here before rendering.
+function parseSpec(json: string): Spec | null {
+  let raw: unknown
+  try {
+    raw = JSON.parse(json)
+  } catch {
+    return null
   }
-  specs.set(specHash, spec)
-  return spec
-}
-
-function parseSpec(raw: unknown): Spec | null {
   if (typeof raw !== 'object' || raw === null) return null
   const { question, category, rules, source } = raw as Record<string, unknown>
   const { label, url } = (source ?? {}) as Record<string, unknown>
@@ -169,7 +146,7 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
     address: state.address,
     question: spec?.question ?? `Market #${id}`,
     category: spec?.category,
-    rules: spec?.rules ?? UNVERIFIED_RULES,
+    rules: spec?.rules ?? INVALID_SPEC_RULES,
     source: spec?.source,
     closesAt: new Date(Number(state.closeTime) * 1000).toISOString(),
     // The contract has no resolution yet, so every state past Open shows as closed.
