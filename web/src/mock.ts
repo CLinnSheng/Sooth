@@ -3,6 +3,7 @@
 export type Category = 'Crypto' | 'Economics' | 'Science' | 'Climate' | 'Sports'
 export const categories: Category[] = ['Crypto', 'Economics', 'Science', 'Climate', 'Sports']
 export type Outcome = 'YES' | 'NO'
+export type PricePoint = { at: number; price: number } // unix seconds, YES price from then on
 
 export type Market = {
   id: number
@@ -16,7 +17,7 @@ export type Market = {
   yesReserve: number
   noReserve: number
   volume: number // USDC
-  history: number[] // daily YES price, oldest first, last = current
+  history: PricePoint[] // oldest first: opens at creation, one point per trade, ends now
   rules: string
   source?: { label: string; url: string }
 }
@@ -38,7 +39,10 @@ export const FEE = 0.01 // Market.FEE_BPS = 100
 
 export const priceYes = (m: Market) => m.noReserve / (m.yesReserve + m.noReserve)
 export const priceOf = (m: Market, o: Outcome) => (o === 'YES' ? priceYes(m) : 1 - priceYes(m))
-export const change30d = (m: Market) => m.history[m.history.length - 1] - m.history[Math.max(0, m.history.length - 31)]
+export const DAY_SECS = 86_400
+// YES price in force at `at`: the last point at or before it, or the opening price before creation.
+export const priceAt = (m: Market, at: number) => (m.history.findLast((pt) => pt.at <= at) ?? m.history[0]).price
+export const changeSince = (m: Market, secs: number) => priceYes(m) - priceAt(m, Date.now() / 1000 - secs)
 
 // Value of a position now: resolved markets pay 1 per winning share, 0 per losing share.
 export function positionValue(p: Position, m: Market) {
@@ -78,6 +82,8 @@ export const pct = (p: number) => `${Math.round(p * 100)}%`
 export const cents = (p: number, digits = 0) => `${(p * 100).toFixed(digits)}¢`
 export const signed = (n: number) => `${n >= 0 ? '+' : '−'}${usdc(Math.abs(n))}`
 export const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
+export const dateTime = (secs: number) =>
+  new Date(secs * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
 export const date = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 export const basescanTx = (tx: string) => `https://sepolia.basescan.org/tx/${tx}`

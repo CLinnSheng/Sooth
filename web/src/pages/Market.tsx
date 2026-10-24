@@ -8,9 +8,11 @@ import {
   basescanAddr,
   basescanTx,
   cents,
-  change30d,
+  DAY_SECS,
+  changeSince,
   compact,
   date,
+  dateTime,
   pct,
   positionValue,
   priceOf,
@@ -21,7 +23,7 @@ import {
   type Outcome,
 } from '../mock'
 
-const ranges = { '1W': 7, '1M': 30, All: 90 }
+const ranges = { '1D': DAY_SECS, '1W': 7 * DAY_SECS, '1M': 30 * DAY_SECS, All: Infinity }
 
 export default function Market() {
   const { id } = useParams()
@@ -46,6 +48,9 @@ export default function Market() {
   const mine = positions.filter((pos) => pos.marketId === market.id)
   const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
+  const now = Date.now() / 1000
+  // A range longer than the market's life starts at creation.
+  const from = Math.max(market.history[0].at, now - ranges[range])
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -66,7 +71,7 @@ export default function Market() {
           <div className="flex items-baseline gap-2">
             <span className="text-6xl font-extrabold leading-none tracking-tighter text-yes">{pct(p)}</span>
             <span className="text-sm text-muted">chance of Yes</span>
-            <span className="ml-auto"><Change value={change30d(market)} /></span>
+            <span className="ml-auto"><Change value={changeSince(market, now - from)} /></span>
           </div>
           <ProbabilityBar p={p} />
           <div className="flex justify-end gap-1 text-xs">
@@ -81,10 +86,10 @@ export default function Market() {
               </button>
             ))}
           </div>
-          <PriceChart points={market.history.slice(-ranges[range])} height={200} axis />
+          <PriceChart points={market.history} from={from} to={now} height={200} axis />
           <div className="flex justify-between text-xs text-muted">
-            <span>{ranges[range]} days ago</span>
-            <span>Today</span>
+            <span>{dateTime(from)}</span>
+            <span>Now</span>
           </div>
           <div className="grid grid-cols-2 border-t border-line pt-3 text-sm">
             <div><p className="text-xs text-muted">Volume</p>{compact(market.volume)} USDC</div>

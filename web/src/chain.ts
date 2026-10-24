@@ -13,7 +13,7 @@ import { useReadContract } from 'wagmi'
 import { getPublicClient } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
 import { DEPLOY_BLOCK, FACTORY, OUTCOME_TOKEN, factoryAbi, marketAbi, outcomeTokenAbi } from './contracts'
-import { categories, type Category, type Market, type Outcome, type Position, type Trade } from './mock'
+import { categories, type Category, type Market, type Outcome, type Position, type PricePoint, type Trade } from './mock'
 import { config } from './wagmi'
 
 const client = getPublicClient(config, { chainId: baseSepolia.id })
@@ -21,7 +21,6 @@ const client = getPublicClient(config, { chainId: baseSepolia.id })
 // publicnode caps eth_getLogs at 50k blocks, about 1.2 days of Base blocks.
 const MAX_LOG_RANGE = 50_000n
 const REFETCH_MS = 30_000
-const DAY_SECS = 86_400
 const STATE_OPEN = 0
 const OUTCOME_YES = 0
 const OUTCOME_NO = 1
@@ -41,7 +40,6 @@ type MarketState = Awaited<ReturnType<typeof readMarket>>
 type SoothLog = Awaited<ReturnType<typeof scanLogs>>[number]
 type CreatedLog = Extract<SoothLog, { eventName: 'MarketCreated' }>
 type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
-type PricePoint = { at: number; price: number }
 
 // Outcome shares use the collateral's 6 decimals.
 const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
@@ -195,7 +193,12 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
     yesReserve,
     noReserve,
     volume: toUnits(volume),
-    history: dailyHistory(blockTimes.get(created.blockNumber)!, prices, noReserve / (yesReserve + noReserve)),
+    // Opens at 50/50 on creation, steps at every trade, and ends on the live pool price.
+    history: [
+      { at: blockTimes.get(created.blockNumber)!, price: OPENING_PRICE },
+      ...prices,
+      { at: Date.now() / 1000, price: noReserve / (yesReserve + noReserve) },
+    ],
   }
 }
 
@@ -218,22 +221,6 @@ function replayPrices(initialLiquidity: bigint, logs: TradeLog[]): PricePoint[] 
     ;[yes, no] = isYes ? [pool, opposite] : [opposite, pool]
     return { at: blockTimes.get(log.blockNumber)!, price: Number(no) / Number(yes + no) }
   })
-}
-
-// One YES price per day since creation, each the last trade price at or before that day's end.
-// Ends on the live pool price, so the chart always agrees with the headline number.
-function dailyHistory(createdAt: number, prices: PricePoint[], current: number): number[] {
-  const days = Math.max(1, Math.ceil((Date.now() / 1000 - createdAt) / DAY_SECS))
-  const history = [OPENING_PRICE]
-  let price = OPENING_PRICE
-  let next = 0
-  for (let day = 1; day <= days; day++) {
-    const dayEnd = createdAt + day * DAY_SECS
-    while (next < prices.length && prices[next].at <= dayEnd) price = prices[next++].price
-    history.push(price)
-  }
-  history[history.length - 1] = current
-  return history
 }
 
 function toTrade(log: TradeLog, marketId: number): Trade {

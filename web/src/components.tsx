@@ -24,7 +24,8 @@ import {
   FEE,
   basescanTx,
   cents,
-  change30d,
+  DAY_SECS,
+  changeSince,
   compact,
   date,
   pct,
@@ -35,6 +36,7 @@ import {
   type Category,
   type Market,
   type Outcome,
+  type PricePoint,
 } from './mock'
 import { useWallet } from './wallet'
 import { config } from './wagmi'
@@ -180,10 +182,22 @@ export function Change({ value }: { value: number }) {
   )
 }
 
-// Inline SVG line of YES probability. No chart library on purpose.
-export function PriceChart({ points, height = 160, axis = false }: { points: number[]; height?: number; axis?: boolean }) {
+// Step line of YES probability between `from` and `to` (unix seconds): an AMM price holds until
+// the next trade moves it. Inline SVG, no chart library on purpose.
+export function PriceChart({ points, from, to, height = 160, axis = false }: {
+  points: PricePoint[]
+  from: number
+  to: number
+  height?: number
+  axis?: boolean
+}) {
   const w = 600
-  const xy = points.map((p, i) => `${(i / (points.length - 1)) * w},${(1 - p) * height}`).join(' ')
+  const start = (points.findLast((pt) => pt.at <= from) ?? points[0]).price
+  const steps = [{ at: from, price: start }, ...points.filter((pt) => pt.at > from && pt.at <= to)]
+  const x = (at: number) => ((at - from) / Math.max(to - from, 1)) * w
+  const y = (price: number) => (1 - price) * height
+  const corners = steps.flatMap((pt, i) => (i ? [`${x(pt.at)},${y(steps[i - 1].price)}`, `${x(pt.at)},${y(pt.price)}`] : [`0,${y(pt.price)}`]))
+  const xy = [...corners, `${w},${y(steps[steps.length - 1].price)}`].join(' ')
   return (
     <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }} aria-hidden>
       {axis &&
@@ -266,7 +280,7 @@ export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Out
             <span className="text-[40px] font-extrabold leading-none tracking-tighter">{pct(p)}</span>
             <span className="text-sm text-muted">chance</span>
             <span className="ml-auto">
-              <Change value={change30d(market)} />
+              <Change value={changeSince(market, 30 * DAY_SECS)} />
             </span>
           </div>
           <ProbabilityBar p={p} />
