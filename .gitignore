@@ -16,3 +16,8 @@ contracts/broadcast/**/dry-run/
 .idea/
 /.vscode/
 .pi/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
