@@ -61,6 +61,8 @@ class Chain:
         self.factory = self._contract(config.factory, "MarketFactory")
         self.chainlink_resolver = self._contract(config.chainlink_resolver, "ChainlinkResolver")
         self.optimistic_resolver = self._contract(config.optimistic_resolver, "OptimisticResolver")
+        # The token the resolver pulls bonds in (the factory's collateral), read from the resolver itself.
+        self.bond_token = self._contract(self.optimistic_resolver.functions.bondToken().call(), "IERC20")
         self._markets: list[MarketInfo] = []
         self._scanned_to = config.deploy_block - 1
 

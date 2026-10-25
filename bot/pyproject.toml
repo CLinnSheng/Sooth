@@ -5,6 +5,7 @@ description = "Resolves Sooth markets: Chainlink auto-resolve and optimistic set
 requires-python = ">=3.12"
 dependencies = [
     "web3>=7.6",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]
