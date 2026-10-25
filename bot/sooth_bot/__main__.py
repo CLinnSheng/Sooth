@@ -4,9 +4,10 @@ import logging
 import time
 
 import httpx
+from playwright.sync_api import sync_playwright
 from web3.exceptions import Web3Exception
 
-from sooth_bot.agent import USER_AGENT, HttpPageFetcher, OpenAICompatibleClient, ResolverAgent
+from sooth_bot.agent import USER_AGENT, BrowserPageFetcher, OpenAICompatibleClient, ResolverAgent
 from sooth_bot.chain import Chain
 from sooth_bot.chainlink import resolve_closed_markets
 from sooth_bot.config import Config
@@ -19,11 +20,13 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = Config.from_env()
     chain = Chain(config)
-    # One HTTP client for LLM calls and page fetches; Go asks callers to identify with their own user agent.
-    with httpx.Client(headers={"User-Agent": USER_AGENT}) as http:
+    # httpx for LLM calls (Go asks callers to identify with their own user agent); one Chromium for every
+    # page fetch, closed with the bot.
+    with httpx.Client(headers={"User-Agent": USER_AGENT}) as http, sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
         agent = ResolverAgent(
             OpenAICompatibleClient(http, config.llm_base_url, config.llm_api_key, config.llm_model),
-            HttpPageFetcher(http),
+            BrowserPageFetcher(browser),
             config.agent_runs,
         )
         settler = OptimisticSettler(chain, config.alert_webhook, agent, config.llm_model, config.agent_retry_seconds)

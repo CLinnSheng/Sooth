@@ -7,13 +7,11 @@ from typing import Any
 import pytest
 
 from sooth_bot.agent import (
-    MAX_FETCHES_PER_RUN,
     FetchError,
     LLMError,
     Resolution,
     ResolverAgent,
     Verdict,
-    html_to_text,
     same_site,
 )
 from sooth_bot.optimistic import evidence_uri
@@ -41,13 +39,8 @@ def _turn(call: dict[str, Any]) -> dict[str, Any]:
     return {"role": "assistant", "content": None, "tool_calls": [call]}
 
 
-def _fetch(url: str = SOURCE) -> dict[str, Any]:
-    return _turn(_call("fetch", {"url": url}))
-
-
-def _submit(outcome: str, quote: str = QUOTE, url: str = SOURCE) -> dict[str, Any]:
-    evidence = [{"url": url, "quote": quote}]
-    return _turn(_call("submit_resolution", {"outcome": outcome, "evidence": evidence, "reasoning": "per rules"}))
+def _submit(outcome: str, quote: str = QUOTE) -> dict[str, Any]:
+    return _turn(_call("submit_resolution", {"outcome": outcome, "quotes": [quote], "reasoning": "per rules"}))
 
 
 class FakeChat:
@@ -88,74 +81,51 @@ def _resolve(replies: list[dict[str, Any]], runs: int = 1) -> tuple[Resolution, 
 
 
 def test_yes_with_verified_quote() -> None:
-    resolution, _, _ = _resolve([_fetch(), _submit("YES")])
+    resolution, _, _ = _resolve([_submit("YES")])
     assert resolution.verdict == Verdict.YES
     assert resolution.evidence[0].quote == QUOTE
 
 
 def test_runs_must_agree_and_each_uses_its_own_session() -> None:
-    resolution, chat, _ = _resolve([_fetch(), _submit("YES"), _fetch(), _submit("YES")], runs=2)
+    resolution, chat, _ = _resolve([_submit("YES"), _submit("YES")], runs=2)
     assert resolution.verdict == Verdict.YES
     assert len(chat.sessions) == 2
 
 
 def test_disagreement_is_unresolvable() -> None:
-    resolution, _, _ = _resolve([_fetch(), _submit("YES"), _fetch(), _submit("NO")], runs=2)
+    resolution, _, _ = _resolve([_submit("YES"), _submit("NO")], runs=2)
     assert resolution.verdict == Verdict.UNRESOLVABLE
 
 
 def test_first_unresolvable_skips_remaining_runs() -> None:
-    resolution, chat, _ = _resolve([_fetch(), _submit("UNRESOLVABLE")], runs=2)
+    resolution, chat, _ = _resolve([_submit("UNRESOLVABLE")], runs=2)
     assert resolution.verdict == Verdict.UNRESOLVABLE
-    assert chat.calls == 2  # one run of two turns; the second run never starts
+    assert chat.calls == 1  # the second run never starts
 
 
 # evidence checks
 
 
 def test_invented_quote_is_rejected() -> None:
-    resolution, _, _ = _resolve([_fetch(), _submit("YES", quote="Apple announced a foldable iPhone yesterday")])
-    assert resolution.verdict == Verdict.UNRESOLVABLE
-
-
-def test_quote_from_page_never_fetched_is_rejected() -> None:
-    resolution, _, _ = _resolve([_fetch(), _submit("YES", url=SOURCE + "other")])
+    resolution, _, _ = _resolve([_submit("YES", quote="Apple announced a foldable iPhone yesterday")])
     assert resolution.verdict == Verdict.UNRESOLVABLE
 
 
 def test_too_short_quote_is_rejected() -> None:
-    resolution, _, _ = _resolve([_fetch(), _submit("YES", quote="Apple today")])
+    resolution, _, _ = _resolve([_submit("YES", quote="Apple today")])
     assert resolution.verdict == Verdict.UNRESOLVABLE
 
 
 def test_quote_whitespace_is_normalized() -> None:
-    resolution, _, _ = _resolve([_fetch(), _submit("YES", quote=QUOTE.replace(" ", "\n  ", 2))])
+    resolution, _, _ = _resolve([_submit("YES", quote=QUOTE.replace(" ", "\n  ", 2))])
     assert resolution.verdict == Verdict.YES
-
-
-# tool limits
-
-
-def test_off_site_fetch_is_refused() -> None:
-    evil = "https://evil.example/answer"
-    resolution, _, fetcher = _resolve([_fetch(evil), _submit("YES", url=evil)])
-    assert fetcher.fetched == []
-    assert resolution.verdict == Verdict.UNRESOLVABLE
-
-
-def test_fetches_are_capped_per_run() -> None:
-    urls = [f"{SOURCE}page-{i}" for i in range(MAX_FETCHES_PER_RUN + 1)]
-    chat = FakeChat([_fetch(url) for url in urls] + [_submit("UNRESOLVABLE")])
-    fetcher = FakeFetcher({url: PAGE for url in urls})
-    ResolverAgent(chat, fetcher, runs=1).resolve(SPEC, CLOSE)
-    assert len(fetcher.fetched) == MAX_FETCHES_PER_RUN
 
 
 # failures become UNRESOLVABLE
 
 
 def test_invalid_tool_arguments() -> None:
-    resolution, _, _ = _resolve([_fetch(), _turn(_call("submit_resolution", "{not json"))])
+    resolution, _, _ = _resolve([_turn(_call("submit_resolution", "{not json"))])
     assert resolution.verdict == Verdict.UNRESOLVABLE
 
 
@@ -165,7 +135,7 @@ def test_model_stops_without_submitting() -> None:
 
 
 def test_llm_error() -> None:
-    resolution = ResolverAgent(FailingChat(), FakeFetcher({}), runs=2).resolve(SPEC, CLOSE)
+    resolution = ResolverAgent(FailingChat(), FakeFetcher({SOURCE: PAGE}), runs=2).resolve(SPEC, CLOSE)
     assert resolution.verdict == Verdict.UNRESOLVABLE
 
 
@@ -174,6 +144,18 @@ def test_spec_without_source_costs_no_tokens() -> None:
     resolution = ResolverAgent(chat, FakeFetcher({}), runs=2).resolve(json.dumps({"question": "?"}), CLOSE)
     assert resolution.verdict == Verdict.UNRESOLVABLE
     assert chat.calls == 0
+
+
+def test_dead_source_costs_no_tokens() -> None:
+    chat = FakeChat([])
+    resolution = ResolverAgent(chat, FakeFetcher({}), runs=2).resolve(SPEC, CLOSE)
+    assert resolution.verdict == Verdict.UNRESOLVABLE
+    assert chat.calls == 0
+
+
+def test_source_is_fetched_once_for_all_runs() -> None:
+    _, _, fetcher = _resolve([_submit("YES"), _submit("YES")], runs=2)
+    assert fetcher.fetched == [SOURCE]
 
 
 # helpers
@@ -194,12 +176,8 @@ def test_same_site(url: str, allowed: bool) -> None:
     assert same_site(url, SOURCE) is allowed
 
 
-def test_html_to_text_drops_scripts_and_collapses_whitespace() -> None:
-    assert html_to_text("<p>Hello\n <b>world</b></p><script>steer()</script><style>p{}</style>") == "Hello world"
-
-
 def test_evidence_uri_round_trips() -> None:
-    resolution, _, _ = _resolve([_fetch(), _submit("YES")])
+    resolution, _, _ = _resolve([_submit("YES")])
     prefix = "data:application/json;base64,"
     uri = evidence_uri(resolution, "deepseek-v4.1-flash")
     bundle = json.loads(base64.b64decode(uri.removeprefix(prefix)))

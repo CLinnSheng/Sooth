@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "web3>=7.6",
     "httpx>=0.28",
+    "playwright>=1.49",
 ]
 
 [dependency-groups]

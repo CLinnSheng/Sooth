@@ -17,13 +17,15 @@ Any OpenAI-compatible chat API with tool calling; defaults to OpenCode Go with `
 (enable the Global region in OpenCode privacy settings for DeepSeek models). Switch with `LLM_BASE_URL`,
 `LLM_MODEL`, `LLM_API_KEY`.
 
-It only proposes when:
-- every fetched page is on the spec's source site (redirects included),
-- each cited quote appears verbatim on a page it fetched,
+The bot renders the spec's source URL in headless Chromium (so JavaScript-built pages work), then asks
+the model once per run with that page's text. It only proposes when:
+- the page loaded and stayed on the source's site (redirects included),
+- each cited quote appears verbatim on the page,
 - all `AGENT_RUNS` runs agree.
 
-Otherwise it skips and retries after `AGENT_RETRY_HOURS`. Expect ~10-25k tokens per market; unclear markets
-stop after one run.
+Otherwise it skips and retries after `AGENT_RETRY_HOURS`. Expect ~15k tokens per market; unclear markets
+stop after one run and a dead source costs none. Pick sources whose answer is visible as text on the page:
+paywalls, logins, bot walls and images can't be read.
 
 ## Run
 
@@ -31,6 +33,7 @@ stop after one run.
 cd contracts && forge build          # the bot loads ABIs from contracts/out
 cd ../bot && cp .env.example .env    # fill in addresses and the bot key
 uv sync
+uv run playwright install chromium   # once, ~150MB
 uv run --env-file .env python -m sooth_bot
 ```
 
@@ -43,5 +46,6 @@ not rule on the bot's own proposals.
 uv run pytest
 ```
 
-Unit tests cover the round search. Chain interactions are thin web3 wrappers; check them with a run on Base
-Sepolia.
+Unit tests cover the round search, the agent's checks against a scripted model, and the browser fetcher
+against a local server (skipped without Chromium). Chain interactions are thin web3 wrappers; check them
+with a run on Base Sepolia.
