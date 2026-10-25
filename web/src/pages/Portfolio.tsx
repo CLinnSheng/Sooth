@@ -57,8 +57,13 @@ export default function Portfolio() {
     })
     .toSorted((a, b) => b.value - a.value)
   const total = rows.reduce((s, r) => s + r.value, 0)
-  const pnl = rows.reduce((s, r) => s + r.pnl, 0)
-  const cost = rows.reduce((s, r) => s + r.p.shares * r.p.avgPrice, 0)
+  // All-time PnL: everything received (sells, redemptions) plus what is still held, minus everything paid for buys.
+  const isOwner = (account: string) => account.toLowerCase() === owner.toLowerCase()
+  const myTrades = data.trades.filter((t) => isOwner(t.trader))
+  const paidIn = myTrades.filter((t) => t.side === 'Buy').reduce((s, t) => s + t.amount, 0)
+  const soldFor = myTrades.filter((t) => t.side === 'Sell').reduce((s, t) => s + t.amount, 0)
+  const redeemed = data.redemptions.filter((r) => isOwner(r.holder)).reduce((s, r) => s + r.payout, 0)
+  const pnl = soldFor + redeemed + total - paidIn
   // redeem() pays both sides at once, so each row's button shows its market's total.
   const payout = (marketId: number) => rows.filter((r) => r.m.id === marketId).reduce((s, r) => s + r.value, 0)
   const history = data.trades.filter((t) => t.trader.toLowerCase() === owner.toLowerCase()).toReversed()
@@ -86,9 +91,9 @@ export default function Portfolio() {
       <div className="grid gap-4 sm:grid-cols-3">
         {stat('Positions value', `${usdc(total)} USDC`)}
         {stat(
-          'Profit / loss',
+          'PnL',
           <span className={pnl >= 0 ? 'text-yes' : 'text-no'}>{signed(pnl)}</span>,
-          cost > 0 && <span className="text-xs text-muted">{((pnl / cost) * 100).toFixed(1)}% on {usdc(cost)} USDC cost</span>,
+          paidIn > 0 && <span className="text-xs text-muted">{((pnl / paidIn) * 100).toFixed(1)}% on {usdc(paidIn)} USDC in</span>,
         )}
         {stat(
           'Cash',

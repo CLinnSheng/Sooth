@@ -43,6 +43,8 @@ export type Market = {
 
 export type Position = { marketId: number; outcome: Outcome; shares: number; avgPrice: number }
 
+export type Redemption = { marketId: number; holder: string; payout: number } // USDC
+
 export type Trade = {
   marketId: number
   trader: string

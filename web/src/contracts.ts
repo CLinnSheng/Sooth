@@ -51,6 +51,7 @@ export const marketAbi = parseAbi([
   'event Sold(address indexed trader, uint8 indexed outcome, uint256 sharesIn, uint256 collateralOut, uint256 fee)',
   'event FeesWithdrawn(address indexed recipient, uint256 amount)',
   'event LiquidityWithdrawn(address indexed recipient, uint256 amount)',
+  'event Redeemed(address indexed holder, uint256 payout)',
   'error InsufficientOutput(uint256 actual, uint256 minimum)',
   'error TradingClosed(uint8 currentState)',
   'error DeadlineExpired(uint256 deadline, uint256 currentTime)',

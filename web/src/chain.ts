@@ -33,6 +33,7 @@ import {
   type Outcome,
   type Position,
   type PricePoint,
+  type Redemption,
   type ResolutionRequest,
   type Trade,
 } from './mock'
@@ -62,6 +63,7 @@ const soothEvents = [
   getAbiItem({ abi: marketAbi, name: 'Sold' }),
   getAbiItem({ abi: marketAbi, name: 'FeesWithdrawn' }),
   getAbiItem({ abi: marketAbi, name: 'LiquidityWithdrawn' }),
+  getAbiItem({ abi: marketAbi, name: 'Redeemed' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Proposed' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Disputed' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Finalized' }),
@@ -77,7 +79,8 @@ type CreatedLog = Extract<SoothLog, { eventName: 'MarketCreated' }>
 type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
 type PriceLog = Extract<SoothLog, { eventName: 'PriceResolved' }>
 type PayoutLog = Extract<SoothLog, { eventName: 'FeesWithdrawn' | 'LiquidityWithdrawn' }>
-type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog>
+type RedeemLog = Extract<SoothLog, { eventName: 'Redeemed' }>
+type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog | RedeemLog>
 // Everything the scan found for one market, besides its MarketCreated.
 type MarketLogs = { trades: TradeLog[]; request: ResolverLog[]; price?: PriceLog; payouts: PayoutLog[] }
 
@@ -134,7 +137,7 @@ export function usePositions(owner: Address | undefined): Position[] {
   })
 }
 
-async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
+async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; redemptions: Redemption[] }> {
   // Pin every read to one block, so state and logs describe the same moment.
   const blockNumber = await client.getBlockNumber()
   const count = await client.readContract({ address: FACTORY, abi: factoryAbi, functionName: 'marketCount', blockNumber })
@@ -155,11 +158,13 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
   const resolverLogs: ResolverLog[] = []
   const priceLogs: PriceLog[] = []
   const payoutLogs: PayoutLog[] = []
+  const redeemLogs: RedeemLog[] = []
   for (const log of scan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
     else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
     else if (log.eventName === 'PriceResolved') priceLogs.push(log)
     else if (log.eventName === 'FeesWithdrawn' || log.eventName === 'LiquidityWithdrawn') payoutLogs.push(log)
+    else if (log.eventName === 'Redeemed') redeemLogs.push(log)
     else resolverLogs.push(log)
   }
 
@@ -179,7 +184,12 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
     return toMarket(id, state, createdLog, logs, parseSpec(createdLog.args.spec))
   })
   const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
-  return { markets, trades }
+  const redemptions = redeemLogs.map((log) => ({
+    marketId: idByAddress.get(log.address.toLowerCase())!,
+    holder: log.args.holder,
+    payout: toUnits(log.args.payout),
+  }))
+  return { markets, trades, redemptions }
 }
 
 async function readMarket(address: Address, blockNumber: bigint) {
