@@ -24,7 +24,7 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuardTransient, IMark
 
     uint16 public constant FEE_BPS = 100;
     uint16 internal constant BPS_DENOMINATOR = 10_000;
-    /// @dev How long the arbitrator has after close to resolve before the market can be cancelled.
+    /// @dev How long the arbitrator has after close to resolve before the market is cancelled.
     uint64 public constant RESOLUTION_WINDOW = 7 days;
 
     uint256 public marketId;
@@ -40,6 +40,9 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuardTransient, IMark
     uint256 public accruedFees;
 
     State internal _state;
+    /// @dev Only meaningful once `_state` is `Resolved`.
+    Outcome public winningOutcome;
+    bool public liquidityWithdrawn;
 
     /// @dev Also locks the implementation so nobody can initialize (and take over) it directly.
     constructor(address factory_, IOutcomeToken outcomeToken_, IERC20 collateral_) {
@@ -132,6 +135,40 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuardTransient, IMark
         emit FeesWithdrawn(creator, amount);
     }
 
+    function resolve(Outcome outcome) external {
+        if (msg.sender != arbitrator) revert NotArbitrator(msg.sender);
+        State current = state();
+        if (current != State.Closed) revert CannotResolve(current);
+
+        _state = State.Resolved;
+        winningOutcome = outcome;
+        emit MarketResolved(outcome);
+    }
+
+    function redeem() external nonReentrant returns (uint256 payout) {
+        uint256 yesAmount = outcomeToken.balanceOf(msg.sender, yesTokenId());
+        uint256 noAmount = outcomeToken.balanceOf(msg.sender, noTokenId());
+        payout = _settlementValue(yesAmount, noAmount);
+        if (payout == 0) revert NothingToRedeem();
+
+        (uint256[] memory ids, uint256[] memory amounts) = _yesNoBatch(yesAmount, noAmount);
+        outcomeToken.burnBatch(msg.sender, ids, amounts);
+        collateral.safeTransfer(msg.sender, payout);
+        emit Redeemed(msg.sender, payout);
+    }
+
+    function withdrawLiquidity() external nonReentrant returns (uint256 amount) {
+        if (liquidityWithdrawn) revert LiquidityAlreadyWithdrawn();
+        amount = _settlementValue(yesPool, noPool);
+        liquidityWithdrawn = true;
+
+        // Pools keep their values so priceYes/priceNo still report the final price.
+        (uint256[] memory ids, uint256[] memory amounts) = _yesNoBatch(yesPool, noPool);
+        outcomeToken.burnBatch(address(this), ids, amounts);
+        collateral.safeTransfer(creator, amount);
+        emit LiquidityWithdrawn(creator, amount);
+    }
+
     function priceYes() external view returns (uint256) {
         return Math.mulDiv(noPool, 1e18, yesPool + noPool);
     }
@@ -140,7 +177,7 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuardTransient, IMark
         return Math.mulDiv(yesPool, 1e18, yesPool + noPool);
     }
 
-    function resolutionDeadline() external view returns (uint64) {
+    function resolutionDeadline() public view returns (uint64) {
         return closeTime + RESOLUTION_WINDOW;
     }
 
@@ -155,8 +192,10 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuardTransient, IMark
     }
 
     function state() public view returns (State) {
-        if (_state == State.Open && block.timestamp >= closeTime) return State.Closed;
-        return _state;
+        if (_state != State.Open) return _state;
+        if (block.timestamp >= resolutionDeadline()) return State.Cancelled;
+        if (block.timestamp >= closeTime) return State.Closed;
+        return State.Open;
     }
 
     function yesTokenId() public view returns (uint256) {
@@ -218,13 +257,30 @@ contract Market is Initializable, ERC1155Holder, ReentrancyGuardTransient, IMark
         return outcome == Outcome.Yes ? yesTokenId() : noTokenId();
     }
 
+    /// @dev What `yesAmount` YES plus `noAmount` NO pay out once the market is settled.
+    ///      Cancelled rounds down, so dust stays in the contract instead of overpaying.
+    function _settlementValue(uint256 yesAmount, uint256 noAmount) internal view returns (uint256) {
+        State current = state();
+        if (current == State.Resolved) return winningOutcome == Outcome.Yes ? yesAmount : noAmount;
+        if (current == State.Cancelled) return (yesAmount + noAmount) / 2;
+        revert NotSettled(current);
+    }
+
     function _yesNoBatch(uint256 amount) internal view returns (uint256[] memory ids, uint256[] memory amounts) {
+        return _yesNoBatch(amount, amount);
+    }
+
+    function _yesNoBatch(uint256 yesAmount, uint256 noAmount)
+        internal
+        view
+        returns (uint256[] memory ids, uint256[] memory amounts)
+    {
         ids = new uint256[](2);
         ids[0] = yesTokenId();
         ids[1] = noTokenId();
         amounts = new uint256[](2);
-        amounts[0] = amount;
-        amounts[1] = amount;
+        amounts[0] = yesAmount;
+        amounts[1] = noAmount;
     }
 
     function _requireTradable(uint256 deadline) internal view {

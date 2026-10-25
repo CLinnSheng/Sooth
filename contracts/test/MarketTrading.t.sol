@@ -238,9 +238,7 @@ contract MarketTradingTest is Test {
         uint256 amount = 2_000e6;
         vm.startPrank(alice);
         usdc.approve(address(market), amount);
-        vm.expectRevert(
-            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, alice, 1_000e6, amount)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, alice, 1_000e6, amount));
         market.buy(IMarket.Outcome.Yes, amount, 1, block.timestamp);
         vm.stopPrank();
     }

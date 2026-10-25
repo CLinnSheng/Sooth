@@ -1,0 +1,18 @@
+[project]
+name = "sooth-bot"
+version = "0.1.0"
+description = "Resolves Sooth markets: Chainlink auto-resolve and optimistic settlement"
+requires-python = ">=3.12"
+dependencies = [
+    "web3>=7.6",
+    "httpx>=0.28",
+    "playwright>=1.49",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

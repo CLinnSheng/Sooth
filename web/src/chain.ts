@@ -13,8 +13,30 @@ import {
 import { useReadContract } from 'wagmi'
 import { getPublicClient } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
-import { DEPLOY_BLOCK, FACTORY, OUTCOME_TOKEN, factoryAbi, marketAbi, outcomeTokenAbi } from './contracts'
-import { categories, type Category, type Market, type Outcome, type Position, type PricePoint, type Trade } from './mock'
+import {
+  CHAINLINK_RESOLVER,
+  DEPLOY_BLOCK,
+  FACTORY,
+  OPTIMISTIC_RESOLVER,
+  OUTCOME_TOKEN,
+  chainlinkResolverAbi,
+  factoryAbi,
+  marketAbi,
+  optimisticResolverAbi,
+  outcomeTokenAbi,
+} from './contracts'
+import {
+  categories,
+  DAY_SECS,
+  type Category,
+  type Market,
+  type Outcome,
+  type Position,
+  type PricePoint,
+  type Redemption,
+  type ResolutionRequest,
+  type Trade,
+} from './mock'
 import { config } from './wagmi'
 
 const client = getPublicClient(config, { chainId: baseSepolia.id })
@@ -23,17 +45,31 @@ const client = getPublicClient(config, { chainId: baseSepolia.id })
 const MAX_LOG_RANGE = 50_000n
 const REFETCH_MS = 30_000
 const STATE_OPEN = 0
+// Mirrors IMarket.State. Proposed (2) is never set by Market; Closed and Proposed both show as closed.
+const STATE_RESOLVED = 3
+const STATE_CANCELLED = 4
 const OUTCOME_YES = 0
 const OUTCOME_NO = 1
 const OUTCOMES: Outcome[] = ['YES', 'NO']
 // The factory only seeds equal pools, so every market opens at 50/50.
 const OPENING_PRICE = 0.5
+// Mirrors Market.RESOLUTION_WINDOW: a market unresolved this long after close cancels.
+const RESOLUTION_WINDOW_SECS = 7 * DAY_SECS
 const INVALID_SPEC_RULES = 'This market was created with a spec that is not in the expected format.'
 
 const soothEvents = [
   getAbiItem({ abi: factoryAbi, name: 'MarketCreated' }),
   getAbiItem({ abi: marketAbi, name: 'Bought' }),
   getAbiItem({ abi: marketAbi, name: 'Sold' }),
+  getAbiItem({ abi: marketAbi, name: 'FeesWithdrawn' }),
+  getAbiItem({ abi: marketAbi, name: 'LiquidityWithdrawn' }),
+  getAbiItem({ abi: marketAbi, name: 'Redeemed' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Proposed' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Disputed' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Finalized' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Ruled' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Refunded' }),
+  getAbiItem({ abi: chainlinkResolverAbi, name: 'PriceResolved' }),
 ]
 
 type Spec = Pick<Market, 'question' | 'category' | 'rules' | 'source'>
@@ -41,6 +77,12 @@ type MarketState = Awaited<ReturnType<typeof readMarket>>
 type SoothLog = Awaited<ReturnType<typeof scanLogs>>[number]
 type CreatedLog = Extract<SoothLog, { eventName: 'MarketCreated' }>
 type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
+type PriceLog = Extract<SoothLog, { eventName: 'PriceResolved' }>
+type PayoutLog = Extract<SoothLog, { eventName: 'FeesWithdrawn' | 'LiquidityWithdrawn' }>
+type RedeemLog = Extract<SoothLog, { eventName: 'Redeemed' }>
+type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog | RedeemLog>
+// Everything the scan found for one market, besides its MarketCreated.
+type MarketLogs = { trades: TradeLog[]; request: ResolverLog[]; price?: PriceLog; payouts: PayoutLog[] }
 
 // Outcome shares use the collateral's 6 decimals.
 const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
@@ -95,7 +137,7 @@ export function usePositions(owner: Address | undefined): Position[] {
   })
 }
 
-async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
+async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; redemptions: Redemption[] }> {
   // Pin every read to one block, so state and logs describe the same moment.
   const blockNumber = await client.getBlockNumber()
   const count = await client.readContract({ address: FACTORY, abi: factoryAbi, functionName: 'marketCount', blockNumber })
@@ -106,38 +148,61 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
   )
   const [states] = await Promise.all([
     Promise.all(addresses.map((address) => readMarket(address, blockNumber))),
-    extendScan([FACTORY, ...addresses], blockNumber),
+    extendScan([FACTORY, OPTIMISTIC_RESOLVER, CHAINLINK_RESOLVER, ...addresses], blockNumber),
   ])
   await cacheBlockTimes(scan.logs)
 
   const idByAddress = new Map(addresses.map((address, i) => [address.toLowerCase(), i + 1]))
   const created = new Map<number, CreatedLog>()
   const tradeLogs: TradeLog[] = []
+  const resolverLogs: ResolverLog[] = []
+  const priceLogs: PriceLog[] = []
+  const payoutLogs: PayoutLog[] = []
+  const redeemLogs: RedeemLog[] = []
   for (const log of scan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
-    else tradeLogs.push(log)
+    else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
+    else if (log.eventName === 'PriceResolved') priceLogs.push(log)
+    else if (log.eventName === 'FeesWithdrawn' || log.eventName === 'LiquidityWithdrawn') payoutLogs.push(log)
+    else if (log.eventName === 'Redeemed') redeemLogs.push(log)
+    else resolverLogs.push(log)
   }
 
   const markets = states.map((state, i) => {
     const id = i + 1
     const createdLog = created.get(id)
     if (!createdLog) throw new Error(`MarketCreated log missing for market ${id}`)
-    const logs = tradeLogs.filter((log) => idByAddress.get(log.address.toLowerCase()) === id)
+    const emittedHere = (log: SoothLog) => idByAddress.get(log.address.toLowerCase()) === id
+    // Resolver events name the market in an argument; the log's own address is the resolver.
+    const aboutHere = (log: ResolverLog | PriceLog) => log.args.market.toLowerCase() === state.address.toLowerCase()
+    const logs: MarketLogs = {
+      trades: tradeLogs.filter(emittedHere),
+      request: resolverLogs.filter(aboutHere),
+      price: priceLogs.find(aboutHere),
+      payouts: payoutLogs.filter(emittedHere),
+    }
     return toMarket(id, state, createdLog, logs, parseSpec(createdLog.args.spec))
   })
   const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
-  return { markets, trades }
+  const redemptions = redeemLogs.map((log) => ({
+    marketId: idByAddress.get(log.address.toLowerCase())!,
+    holder: log.args.holder,
+    payout: toUnits(log.args.payout),
+  }))
+  return { markets, trades, redemptions }
 }
 
 async function readMarket(address: Address, blockNumber: bigint) {
   const call = { address, abi: marketAbi, blockNumber } as const
-  const [yesPool, noPool, closeTime, state] = await Promise.all([
+  const [yesPool, noPool, closeTime, state, winningOutcome, liquidityWithdrawn] = await Promise.all([
     client.readContract({ ...call, functionName: 'yesPool' }),
     client.readContract({ ...call, functionName: 'noPool' }),
     client.readContract({ ...call, functionName: 'closeTime' }),
     client.readContract({ ...call, functionName: 'state' }),
+    client.readContract({ ...call, functionName: 'winningOutcome' }),
+    client.readContract({ ...call, functionName: 'liquidityWithdrawn' }),
   ])
-  return { address, yesPool, noPool, closeTime, state }
+  return { address, yesPool, noPool, closeTime, state, winningOutcome, liquidityWithdrawn }
 }
 
 // Scans only blocks not seen before. A market created after the last scan has no earlier trades,
@@ -188,21 +253,31 @@ export function parseSpec(json: string): Spec | null {
   return isValid ? { question, rules, category: category as Category, source: { label, url } } : null
 }
 
-function toMarket(id: number, state: MarketState, created: CreatedLog, logs: TradeLog[], spec: Spec | null): Market {
+function toMarket(id: number, state: MarketState, created: CreatedLog, logs: MarketLogs, spec: Spec | null): Market {
   const yesReserve = toUnits(state.yesPool)
   const noReserve = toUnits(state.noPool)
-  const volume = logs.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
-  const prices = replayPrices(created.args.initialLiquidity, logs)
+  const volume = logs.trades.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
+  const prices = replayPrices(created.args.initialLiquidity, logs.trades)
+  const paid = (event: PayoutLog['eventName']) =>
+    toUnits(logs.payouts.filter((log) => log.eventName === event).reduce((sum, log) => sum + log.args.amount, 0n))
   return {
     id,
     address: state.address,
+    creator: created.args.creator,
+    arbitrator: created.args.arbitrator,
     question: spec?.question ?? `Market #${id}`,
     category: spec?.category,
     rules: spec?.rules ?? INVALID_SPEC_RULES,
     source: spec?.source,
     closesAt: new Date(Number(state.closeTime) * 1000).toISOString(),
-    // The contract has no resolution yet, so every state past Open shows as closed.
-    status: state.state === STATE_OPEN ? 'open' : 'closed',
+    resolutionDeadline: Number(state.closeTime) + RESOLUTION_WINDOW_SECS,
+    status: toStatus(state.state),
+    // winningOutcome reads as Yes (0) until resolution, so it only counts once Resolved.
+    resolvedOutcome: state.state === STATE_RESOLVED ? OUTCOMES[state.winningOutcome] : undefined,
+    liquidityWithdrawn: state.liquidityWithdrawn,
+    request: replayRequest(logs.request),
+    priceResolution: logs.price && { roundId: logs.price.args.roundId, price: logs.price.args.price },
+    collected: { fees: paid('FeesWithdrawn'), liquidity: paid('LiquidityWithdrawn') },
     yesReserve,
     noReserve,
     volume: toUnits(volume),
@@ -213,6 +288,13 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
       { at: Date.now() / 1000, price: noReserve / (yesReserve + noReserve) },
     ],
   }
+}
+
+function toStatus(state: number): Market['status'] {
+  if (state === STATE_OPEN) return 'open'
+  if (state === STATE_RESOLVED) return 'resolved'
+  if (state === STATE_CANCELLED) return 'cancelled'
+  return 'closed'
 }
 
 // Mirrors the pool updates in Market.buy/sell, so each trade's resulting price comes from its log alone.
@@ -234,6 +316,29 @@ function replayPrices(initialLiquidity: bigint, logs: TradeLog[]): PricePoint[] 
     ;[yes, no] = isYes ? [pool, opposite] : [opposite, pool]
     return { at: blockTimes.get(log.blockNumber)!, price: Number(no) / Number(yes + no) }
   })
+}
+
+const SETTLED_BY = { Finalized: 'finalized', Ruled: 'ruled', Refunded: 'refunded' } as const
+
+// The contract allows one request per market, so its events replay in order into one record.
+function replayRequest(logs: ResolverLog[]): ResolutionRequest | undefined {
+  let request: ResolutionRequest | undefined
+  for (const log of logs) {
+    if (log.eventName === 'Proposed')
+      request = {
+        status: 'proposed',
+        proposer: log.args.proposer,
+        outcome: OUTCOMES[log.args.outcome],
+        // The block time is the contract's proposedAt, so the challenge window matches it exactly.
+        proposedAt: blockTimes.get(log.blockNumber)!,
+        proposalEvidence: log.args.evidenceURI,
+      }
+    else if (!request) continue
+    else if (log.eventName === 'Disputed')
+      request = { ...request, status: 'disputed', disputer: log.args.disputer, disputeEvidence: log.args.evidenceURI }
+    else request = { ...request, status: 'settled', settledBy: SETTLED_BY[log.eventName] }
+  }
+  return request
 }
 
 function toTrade(log: TradeLog, marketId: number): Trade {

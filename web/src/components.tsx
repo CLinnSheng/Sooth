@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  Ban,
   Check,
   CloudSun,
   Coins,
@@ -22,6 +23,7 @@ import { baseSepolia } from 'wagmi/chains'
 import { useIsAdmin } from './chain'
 import { OUTCOME_TOKEN, USDC, marketAbi, outcomeTokenAbi } from './contracts'
 import {
+  CANCELLED_PAYOUT,
   FEE,
   basescanTx,
   cents,
@@ -39,6 +41,7 @@ import {
   type Outcome,
   type PricePoint,
 } from './mock'
+import { useTransaction } from './tx'
 import { useWallet } from './wallet'
 import { config } from './wagmi'
 
@@ -75,7 +78,7 @@ export function Nav() {
           Portfolio
         </NavLink>
         {isAdmin && (
-          <NavLink to="/admin/create" className={link}>
+          <NavLink to="/admin" className={link}>
             Admin
           </NavLink>
         )}
@@ -150,6 +153,18 @@ const categoryIcons: Record<Category, typeof Coins> = {
   Sports: Trophy,
 }
 
+// Create | Collect on both admin pages; each tab is its own URL, so it survives reloads and can be shared.
+export function AdminTabs() {
+  const pill = ({ isActive }: { isActive: boolean }) =>
+    `rounded-full px-3.5 py-1.5 text-sm font-medium ${focus} ${isActive ? 'bg-white text-black' : 'text-muted hover:bg-raised'}`
+  return (
+    <nav aria-label="Admin" className="flex gap-1">
+      <NavLink to="/admin/create" className={pill}>Create</NavLink>
+      <NavLink to="/admin/collect" className={pill}>Collect</NavLink>
+    </nav>
+  )
+}
+
 export function CategoryLabel({ category }: { category: Category }) {
   const Icon = categoryIcons[category]
   return (
@@ -164,6 +179,12 @@ export function StatusBadge({ market }: { market: Market }) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-raised px-2.5 py-0.5 text-xs font-medium text-muted">
         <span className="size-1.5 rounded-full bg-muted" /> Trading closed
+      </span>
+    )
+  if (market.status === 'cancelled')
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-raised px-2.5 py-0.5 text-xs font-medium text-muted">
+        <Ban size={12} /> Cancelled
       </span>
     )
   if (market.status === 'resolved')
@@ -288,7 +309,14 @@ export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Out
           {market.question}
         </Link>
       </h3>
-      {market.status === 'resolved' ? (
+      {market.status === 'cancelled' ? (
+        <div className="mt-auto flex flex-col gap-1">
+          <span className="text-3xl font-extrabold tracking-tight text-muted">Cancelled</span>
+          <span className="text-xs text-muted">
+            Not resolved in time · every share redeems for {usdc(CANCELLED_PAYOUT)} USDC
+          </span>
+        </div>
+      ) : market.status === 'resolved' ? (
         <div className="mt-auto flex flex-col gap-1">
           <span className="flex items-center gap-2 text-3xl font-extrabold tracking-tight">
             <Check size={26} strokeWidth={3} className={market.resolvedOutcome === 'YES' ? 'text-yes' : 'text-no'} />
@@ -330,6 +358,31 @@ export function ShowMore({ shown, total, onClick }: { shown: number; total: numb
     <button onClick={onClick} className={`w-full rounded-xl py-2 text-sm font-medium text-muted hover:bg-raised hover:text-white ${focus}`}>
       Show {Math.min(PAGE_SIZE, total - shown)} more of {total - shown}
     </button>
+  )
+}
+
+// Settled-market payouts: redeem pays every share the wallet holds (YES and NO together),
+// withdrawLiquidity pays the creator the pool's shares.
+const claims = {
+  redeem: { label: 'Redeem', pending: 'Redeeming…' },
+  withdrawLiquidity: { label: 'Withdraw', pending: 'Withdrawing…' },
+} as const
+
+export function ClaimButton({ market, claim, payout }: { market: Market; claim: keyof typeof claims; payout: number }) {
+  const tx = useTransaction()
+  const send = () =>
+    tx.run(() => tx.confirm(claims[claim].pending, tx.write({ address: market.address as Address, abi: marketAbi, functionName: claim })))
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <button
+        onClick={send}
+        disabled={tx.pending !== null}
+        className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-black hover:bg-zinc-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
+      >
+        {tx.pending ? <><LoaderCircle size={12} className="animate-spin" /> {tx.pending}</> : `${claims[claim].label} ${usdc(payout)}`}
+      </button>
+      {tx.error && <span role="alert" className="text-xs text-no">{tx.error}</span>}
+    </span>
   )
 }
 

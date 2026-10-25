@@ -5,14 +5,33 @@ export const categories: Category[] = ['Crypto', 'Economics', 'Science', 'Climat
 export type Outcome = 'YES' | 'NO'
 export type PricePoint = { at: number; price: number } // unix seconds, YES price from then on
 
+// The latest optimistic request on a market, replayed from OptimisticResolver events.
+export type ResolutionRequest = {
+  status: 'proposed' | 'disputed' | 'settled'
+  proposer: string
+  outcome: Outcome // what the proposer claimed
+  proposedAt: number // unix seconds; the challenge window runs from here
+  proposalEvidence: string // evidenceURI as emitted, untrusted
+  disputer?: string
+  disputeEvidence?: string
+  settledBy?: 'finalized' | 'ruled' | 'refunded'
+}
+
 export type Market = {
   id: number
   address: string
+  creator: string // seeded the pool, so withdraws its liquidity once the market settles
+  arbitrator: string // the only address that can resolve: a resolver contract or a wallet
   question: string
   category?: Category // unset when the on-chain spec is malformed
   closesAt: string // ISO timestamp
-  status: 'open' | 'closed' | 'resolved'
+  resolutionDeadline: number // unix seconds; unresolved by then, the market cancels
+  status: 'open' | 'closed' | 'resolved' | 'cancelled'
   resolvedOutcome?: Outcome
+  liquidityWithdrawn: boolean
+  request?: ResolutionRequest // absent until someone proposes
+  priceResolution?: { roundId: bigint; price: bigint } // Chainlink markets: the round and raw answer they settled on
+  collected: { fees: number; liquidity: number } // USDC already paid out to the creator
   // CPMM pool reserves of outcome shares. YES price = noReserve / (yesReserve + noReserve).
   yesReserve: number
   noReserve: number
@@ -23,6 +42,8 @@ export type Market = {
 }
 
 export type Position = { marketId: number; outcome: Outcome; shares: number; avgPrice: number }
+
+export type Redemption = { marketId: number; holder: string; payout: number } // USDC
 
 export type Trade = {
   marketId: number
@@ -36,17 +57,27 @@ export type Trade = {
 }
 
 export const FEE = 0.01 // Market.FEE_BPS = 100
+// Unresolved by the deadline: every share redeems at half, YES and NO alike (Market._settlementValue).
+export const CANCELLED_PAYOUT = 0.5
 
 export const priceYes = (m: Market) => m.noReserve / (m.yesReserve + m.noReserve)
 export const priceOf = (m: Market, o: Outcome) => (o === 'YES' ? priceYes(m) : 1 - priceYes(m))
+// Resolved or cancelled: shares and the creator's liquidity can be redeemed.
+export const isSettled = (m: Market) => m.status === 'resolved' || m.status === 'cancelled'
+// withdrawLiquidity pays the creator for the pool's shares, valued like anyone else's.
+export const poolPayout = (m: Market) =>
+  m.status === 'resolved'
+    ? m.resolvedOutcome === 'YES' ? m.yesReserve : m.noReserve
+    : (m.yesReserve + m.noReserve) * CANCELLED_PAYOUT
 export const DAY_SECS = 86_400
 // YES price in force at `at`: the last point at or before it, or the opening price before creation.
 export const priceAt = (m: Market, at: number) => (m.history.findLast((pt) => pt.at <= at) ?? m.history[0]).price
 export const changeSince = (m: Market, secs: number) => priceYes(m) - priceAt(m, Date.now() / 1000 - secs)
 
-// Value of a position now: resolved markets pay 1 per winning share, 0 per losing share.
+// Value of a position now: resolved markets pay 1 per winning share, 0 per losing share; cancelled pay half.
 export function positionValue(p: Position, m: Market) {
   if (m.status === 'resolved') return m.resolvedOutcome === p.outcome ? p.shares : 0
+  if (m.status === 'cancelled') return p.shares * CANCELLED_PAYOUT
   return p.shares * priceOf(m, p.outcome)
 }
 
