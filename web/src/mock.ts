@@ -5,16 +5,31 @@ export const categories: Category[] = ['Crypto', 'Economics', 'Science', 'Climat
 export type Outcome = 'YES' | 'NO'
 export type PricePoint = { at: number; price: number } // unix seconds, YES price from then on
 
+// The latest optimistic request on a market, replayed from OptimisticResolver events.
+export type ResolutionRequest = {
+  status: 'proposed' | 'disputed' | 'settled'
+  proposer: string
+  outcome: Outcome // what the proposer claimed
+  proposedAt: number // unix seconds; the challenge window runs from here
+  proposalEvidence: string // evidenceURI as emitted, untrusted
+  disputer?: string
+  disputeEvidence?: string
+  settledBy?: 'finalized' | 'ruled' | 'refunded'
+}
+
 export type Market = {
   id: number
   address: string
   creator: string // seeded the pool, so withdraws its liquidity once the market settles
+  arbitrator: string // the only address that can resolve: a resolver contract or a wallet
   question: string
   category?: Category // unset when the on-chain spec is malformed
   closesAt: string // ISO timestamp
+  resolutionDeadline: number // unix seconds; unresolved by then, the market cancels
   status: 'open' | 'closed' | 'resolved' | 'cancelled'
   resolvedOutcome?: Outcome
   liquidityWithdrawn: boolean
+  request?: ResolutionRequest // absent until someone proposes
   // CPMM pool reserves of outcome shares. YES price = noReserve / (yesReserve + noReserve).
   yesReserve: number
   noReserve: number

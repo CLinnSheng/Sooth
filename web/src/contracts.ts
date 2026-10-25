@@ -8,6 +8,8 @@ export const USDC: Address = '0x5f29331BBBA6f605942f5de0B217359F3C7B7c51'
 export const DEPLOY_BLOCK = 50_040_022n
 // Deployed by the factory constructor: one ERC-1155 holds every market's YES/NO shares.
 export const OUTCOME_TOKEN: Address = '0xA2D1e9A1e195d01B1aC21090962B7F2AD76BDB5B'
+// Bonded-proposal resolver; its owner is the judge for disputes.
+export const OPTIMISTIC_RESOLVER: Address = '0xe37DB6692De70F5fe69fcABb64b7C737fA096335'
 
 export const factoryAbi = parseAbi([
   'function marketCount() view returns (uint256)',
@@ -40,6 +42,7 @@ export const marketAbi = parseAbi([
   'function sell(uint8 outcome, uint256 sharesIn, uint256 minCollateralOut, uint256 deadline) returns (uint256 collateralOut)',
   'function redeem() returns (uint256 payout)',
   'function withdrawLiquidity() returns (uint256 amount)',
+  'function resolve(uint8 outcome)',
   'event Bought(address indexed trader, uint8 indexed outcome, uint256 collateralIn, uint256 sharesOut, uint256 fee)',
   'event Sold(address indexed trader, uint8 indexed outcome, uint256 sharesIn, uint256 collateralOut, uint256 fee)',
   'error InsufficientOutput(uint256 actual, uint256 minimum)',
@@ -48,6 +51,8 @@ export const marketAbi = parseAbi([
   'error NotSettled(uint8 currentState)',
   'error NothingToRedeem()',
   'error LiquidityAlreadyWithdrawn()',
+  'error NotArbitrator(address caller)',
+  'error CannotResolve(uint8 currentState)',
 ])
 
 export const outcomeTokenAbi = parseAbi([
@@ -55,4 +60,33 @@ export const outcomeTokenAbi = parseAbi([
   'function balanceOfBatch(address[] accounts, uint256[] ids) view returns (uint256[])',
   'function isApprovedForAll(address account, address operator) view returns (bool)',
   'function setApprovalForAll(address operator, bool approved)',
+])
+
+// Status: 0 None, 1 Proposed, 2 Disputed, 3 Settled. Bonds are in USDC.
+export const optimisticResolverAbi = parseAbi([
+  'function propose(address market, uint8 outcome, string evidenceURI)',
+  'function dispute(address market, string evidenceURI)',
+  'function finalize(address market)',
+  'function rule(address market, uint8 outcome)',
+  'function refund(address market)',
+  'function bond() view returns (uint256)',
+  'function challengeWindow() view returns (uint64)',
+  'function owner() view returns (address)',
+  'event Proposed(address indexed market, address indexed proposer, uint8 outcome, string evidenceURI)',
+  'event Disputed(address indexed market, address indexed disputer, string evidenceURI)',
+  'event Finalized(address indexed market, uint8 outcome)',
+  'event Ruled(address indexed market, uint8 outcome, address indexed winner)',
+  'event Refunded(address indexed market)',
+  'error NotFactoryMarket(address market)',
+  'error MarketNotUsingResolver(address market)',
+  'error MarketNotClosed(uint8 currentState)',
+  'error ProposalTooLate(uint256 windowEnd, uint64 resolutionDeadline)',
+  'error WrongStatus(uint8 current)',
+  'error ChallengeWindowOpen(uint256 windowEnd)',
+  'error ChallengeWindowClosed(uint256 windowEnd)',
+  'error MarketNotCancelled(uint8 currentState)',
+  'error OwnableUnauthorizedAccount(address account)',
+  // Bubbled up from the bond transfer, so a short balance or allowance reads as such.
+  'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
+  'error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)',
 ])

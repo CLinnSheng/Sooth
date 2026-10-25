@@ -13,8 +13,18 @@ import {
 import { useReadContract } from 'wagmi'
 import { getPublicClient } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
-import { DEPLOY_BLOCK, FACTORY, OUTCOME_TOKEN, factoryAbi, marketAbi, outcomeTokenAbi } from './contracts'
-import { categories, type Category, type Market, type Outcome, type Position, type PricePoint, type Trade } from './mock'
+import { DEPLOY_BLOCK, FACTORY, OPTIMISTIC_RESOLVER, OUTCOME_TOKEN, factoryAbi, marketAbi, optimisticResolverAbi, outcomeTokenAbi } from './contracts'
+import {
+  categories,
+  DAY_SECS,
+  type Category,
+  type Market,
+  type Outcome,
+  type Position,
+  type PricePoint,
+  type ResolutionRequest,
+  type Trade,
+} from './mock'
 import { config } from './wagmi'
 
 const client = getPublicClient(config, { chainId: baseSepolia.id })
@@ -31,12 +41,19 @@ const OUTCOME_NO = 1
 const OUTCOMES: Outcome[] = ['YES', 'NO']
 // The factory only seeds equal pools, so every market opens at 50/50.
 const OPENING_PRICE = 0.5
+// Mirrors Market.RESOLUTION_WINDOW: a market unresolved this long after close cancels.
+const RESOLUTION_WINDOW_SECS = 7 * DAY_SECS
 const INVALID_SPEC_RULES = 'This market was created with a spec that is not in the expected format.'
 
 const soothEvents = [
   getAbiItem({ abi: factoryAbi, name: 'MarketCreated' }),
   getAbiItem({ abi: marketAbi, name: 'Bought' }),
   getAbiItem({ abi: marketAbi, name: 'Sold' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Proposed' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Disputed' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Finalized' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Ruled' }),
+  getAbiItem({ abi: optimisticResolverAbi, name: 'Refunded' }),
 ]
 
 type Spec = Pick<Market, 'question' | 'category' | 'rules' | 'source'>
@@ -44,6 +61,7 @@ type MarketState = Awaited<ReturnType<typeof readMarket>>
 type SoothLog = Awaited<ReturnType<typeof scanLogs>>[number]
 type CreatedLog = Extract<SoothLog, { eventName: 'MarketCreated' }>
 type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
+type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog>
 
 // Outcome shares use the collateral's 6 decimals.
 const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
@@ -109,16 +127,18 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
   )
   const [states] = await Promise.all([
     Promise.all(addresses.map((address) => readMarket(address, blockNumber))),
-    extendScan([FACTORY, ...addresses], blockNumber),
+    extendScan([FACTORY, OPTIMISTIC_RESOLVER, ...addresses], blockNumber),
   ])
   await cacheBlockTimes(scan.logs)
 
   const idByAddress = new Map(addresses.map((address, i) => [address.toLowerCase(), i + 1]))
   const created = new Map<number, CreatedLog>()
   const tradeLogs: TradeLog[] = []
+  const resolverLogs: ResolverLog[] = []
   for (const log of scan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
-    else tradeLogs.push(log)
+    else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
+    else resolverLogs.push(log)
   }
 
   const markets = states.map((state, i) => {
@@ -126,7 +146,9 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
     const createdLog = created.get(id)
     if (!createdLog) throw new Error(`MarketCreated log missing for market ${id}`)
     const logs = tradeLogs.filter((log) => idByAddress.get(log.address.toLowerCase()) === id)
-    return toMarket(id, state, createdLog, logs, parseSpec(createdLog.args.spec))
+    // Resolver events name the market in an argument; the log's own address is the resolver.
+    const requestLogs = resolverLogs.filter((log) => log.args.market.toLowerCase() === state.address.toLowerCase())
+    return toMarket(id, state, createdLog, logs, requestLogs, parseSpec(createdLog.args.spec))
   })
   const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
   return { markets, trades }
@@ -193,7 +215,7 @@ export function parseSpec(json: string): Spec | null {
   return isValid ? { question, rules, category: category as Category, source: { label, url } } : null
 }
 
-function toMarket(id: number, state: MarketState, created: CreatedLog, logs: TradeLog[], spec: Spec | null): Market {
+function toMarket(id: number, state: MarketState, created: CreatedLog, logs: TradeLog[], requestLogs: ResolverLog[], spec: Spec | null): Market {
   const yesReserve = toUnits(state.yesPool)
   const noReserve = toUnits(state.noPool)
   const volume = logs.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
@@ -202,15 +224,18 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
     id,
     address: state.address,
     creator: created.args.creator,
+    arbitrator: created.args.arbitrator,
     question: spec?.question ?? `Market #${id}`,
     category: spec?.category,
     rules: spec?.rules ?? INVALID_SPEC_RULES,
     source: spec?.source,
     closesAt: new Date(Number(state.closeTime) * 1000).toISOString(),
+    resolutionDeadline: Number(state.closeTime) + RESOLUTION_WINDOW_SECS,
     status: toStatus(state.state),
     // winningOutcome reads as Yes (0) until resolution, so it only counts once Resolved.
     resolvedOutcome: state.state === STATE_RESOLVED ? OUTCOMES[state.winningOutcome] : undefined,
     liquidityWithdrawn: state.liquidityWithdrawn,
+    request: replayRequest(requestLogs),
     yesReserve,
     noReserve,
     volume: toUnits(volume),
@@ -249,6 +274,29 @@ function replayPrices(initialLiquidity: bigint, logs: TradeLog[]): PricePoint[] 
     ;[yes, no] = isYes ? [pool, opposite] : [opposite, pool]
     return { at: blockTimes.get(log.blockNumber)!, price: Number(no) / Number(yes + no) }
   })
+}
+
+const SETTLED_BY = { Finalized: 'finalized', Ruled: 'ruled', Refunded: 'refunded' } as const
+
+// The contract allows one request per market, so its events replay in order into one record.
+function replayRequest(logs: ResolverLog[]): ResolutionRequest | undefined {
+  let request: ResolutionRequest | undefined
+  for (const log of logs) {
+    if (log.eventName === 'Proposed')
+      request = {
+        status: 'proposed',
+        proposer: log.args.proposer,
+        outcome: OUTCOMES[log.args.outcome],
+        // The block time is the contract's proposedAt, so the challenge window matches it exactly.
+        proposedAt: blockTimes.get(log.blockNumber)!,
+        proposalEvidence: log.args.evidenceURI,
+      }
+    else if (!request) continue
+    else if (log.eventName === 'Disputed')
+      request = { ...request, status: 'disputed', disputer: log.args.disputer, disputeEvidence: log.args.evidenceURI }
+    else request = { ...request, status: 'settled', settledBy: SETTLED_BY[log.eventName] }
+  }
+  return request
 }
 
 function toTrade(log: TradeLog, marketId: number): Trade {
