@@ -78,7 +78,7 @@ export function Nav() {
           Portfolio
         </NavLink>
         {isAdmin && (
-          <NavLink to="/admin/create" className={link}>
+          <NavLink to="/admin" className={link}>
             Admin
           </NavLink>
         )}
@@ -151,6 +151,18 @@ const categoryIcons: Record<Category, typeof Coins> = {
   Science: Rocket,
   Climate: CloudSun,
   Sports: Trophy,
+}
+
+// Create | Collect on both admin pages; each tab is its own URL, so it survives reloads and can be shared.
+export function AdminTabs() {
+  const pill = ({ isActive }: { isActive: boolean }) =>
+    `rounded-full px-3.5 py-1.5 text-sm font-medium ${focus} ${isActive ? 'bg-white text-black' : 'text-muted hover:bg-raised'}`
+  return (
+    <nav aria-label="Admin" className="flex gap-1">
+      <NavLink to="/admin/create" className={pill}>Create</NavLink>
+      <NavLink to="/admin/collect" className={pill}>Collect</NavLink>
+    </nav>
+  )
 }
 
 export function CategoryLabel({ category }: { category: Category }) {

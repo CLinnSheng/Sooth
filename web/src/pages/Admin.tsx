@@ -7,6 +7,7 @@ import { useAccount, useReadContract, useSwitchChain, useWriteContract } from 'w
 import { waitForTransactionReceipt } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
 import { parseSpec, useIsAdmin } from '../chain'
+import { AdminTabs } from '../components'
 import { CHAINLINK_RESOLVER, FACTORY, OPTIMISTIC_RESOLVER, USDC, factoryAbi } from '../contracts'
 import { categories, type Category } from '../mock'
 import { useWallet } from '../wallet'
@@ -150,61 +151,64 @@ export default function Admin() {
   )
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-4 rounded-3xl bg-surface p-6">
-      <h1 className="text-2xl font-bold tracking-tight">Create market</h1>
-      <fieldset disabled={busy} className="flex flex-col gap-4">
-        {label('Question', <input value={question} onChange={(e) => setQuestion(e.target.value)} className={field} />)}
-        {label(
-          'Category',
-          <select value={category} onChange={(e) => setCategory(e.target.value as Category)} className={field}>
-            {categories.map((c) => <option key={c}>{c}</option>)}
-          </select>,
-        )}
-        {label('Resolution rules', <textarea rows={4} value={rules} onChange={(e) => setRules(e.target.value)} className={field} />)}
-        <div className="grid gap-4 sm:grid-cols-2">
-          {label('Source label', <input value={sourceLabel} onChange={(e) => setSourceLabel(e.target.value)} className={field} />)}
-          {label('Source URL', <input type="url" placeholder="https://" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} className={field} />)}
-        </div>
-        {label(
-          'Closes at (your local time)',
-          <input type="datetime-local" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} className={field} />,
-          closeTime ? new Date(closeTime * 1000).toUTCString() : undefined,
-        )}
-        <div className="grid gap-4 sm:grid-cols-2">
+    <div className="mx-auto flex max-w-xl flex-col gap-4">
+      <AdminTabs />
+      <div className="flex flex-col gap-4 rounded-3xl bg-surface p-6">
+        <h1 className="text-2xl font-bold tracking-tight">Create market</h1>
+        <fieldset disabled={busy} className="flex flex-col gap-4">
+          {label('Question', <input value={question} onChange={(e) => setQuestion(e.target.value)} className={field} />)}
           {label(
-            'Seed liquidity (USDC)',
-            <input
-              inputMode="decimal"
-              value={liquidity}
-              onChange={(e) => { if (/^\d*\.?\d{0,6}$/.test(e.target.value)) setLiquidity(e.target.value) }}
-              className={field}
-            />,
-            `Balance ${wallet.usdc == null ? '—' : wallet.usdc} USDC`,
-          )}
-          {label(
-            'Resolution',
-            <select value={resolution} onChange={(e) => setResolution(e.target.value as Resolution)} className={field}>
-              {Object.entries(RESOLUTIONS).map(([value, { label }]) => <option key={value} value={value}>{label}</option>)}
+            'Category',
+            <select value={category} onChange={(e) => setCategory(e.target.value as Category)} className={field}>
+              {categories.map((c) => <option key={c}>{c}</option>)}
             </select>,
-            RESOLUTIONS[resolution].hint,
           )}
-        </div>
-        {resolution === 'custom' &&
-          label('Arbitrator address', <input placeholder={wallet.address} value={customArbitrator} onChange={(e) => setCustomArbitrator(e.target.value)} className={field} />)}
-      </fieldset>
+          {label('Resolution rules', <textarea rows={4} value={rules} onChange={(e) => setRules(e.target.value)} className={field} />)}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {label('Source label', <input value={sourceLabel} onChange={(e) => setSourceLabel(e.target.value)} className={field} />)}
+            {label('Source URL', <input type="url" placeholder="https://" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} className={field} />)}
+          </div>
+          {label(
+            'Closes at (your local time)',
+            <input type="datetime-local" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} className={field} />,
+            closeTime ? new Date(closeTime * 1000).toUTCString() : undefined,
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {label(
+              'Seed liquidity (USDC)',
+              <input
+                inputMode="decimal"
+                value={liquidity}
+                onChange={(e) => { if (/^\d*\.?\d{0,6}$/.test(e.target.value)) setLiquidity(e.target.value) }}
+                className={field}
+              />,
+              `Balance ${wallet.usdc == null ? '—' : wallet.usdc} USDC`,
+            )}
+            {label(
+              'Resolution',
+              <select value={resolution} onChange={(e) => setResolution(e.target.value as Resolution)} className={field}>
+                {Object.entries(RESOLUTIONS).map(([value, { label }]) => <option key={value} value={value}>{label}</option>)}
+              </select>,
+              RESOLUTIONS[resolution].hint,
+            )}
+          </div>
+          {resolution === 'custom' &&
+            label('Arbitrator address', <input placeholder={wallet.address} value={customArbitrator} onChange={(e) => setCustomArbitrator(e.target.value)} className={field} />)}
+        </fieldset>
 
-      <button
-        onClick={action.onClick}
-        disabled={action.disabled}
-        className="flex items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
-      >
-        {action.label}
-      </button>
-      {step === 'failed' && (
-        <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-no-soft px-3 py-2 text-sm text-no">
-          <TriangleAlert size={15} className="shrink-0" /> {error}
-        </p>
-      )}
+        <button
+          onClick={action.onClick}
+          disabled={action.disabled}
+          className="flex items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
+        >
+          {action.label}
+        </button>
+        {step === 'failed' && (
+          <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-no-soft px-3 py-2 text-sm text-no">
+            <TriangleAlert size={15} className="shrink-0" /> {error}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

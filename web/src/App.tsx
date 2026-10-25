@@ -1,7 +1,8 @@
-import { Route, Routes } from 'react-router'
+import { Navigate, Route, Routes } from 'react-router'
 import { Nav } from './components'
 import { WalletProvider } from './wallet'
 import Admin from './pages/Admin'
+import Collect from './pages/Collect'
 import Home from './pages/Home'
 import Market from './pages/Market'
 import Portfolio from './pages/Portfolio'
@@ -16,7 +17,9 @@ export default function App() {
           <Route path="/market/:id" element={<Market />} />
           <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/portfolio/:address" element={<Portfolio />} />
+          <Route path="/admin" element={<Navigate to="/admin/create" replace />} />
           <Route path="/admin/create" element={<Admin />} />
+          <Route path="/admin/collect" element={<Collect />} />
           <Route path="*"element={<p className="text-zinc-500">Page not found.</p>} />
         </Routes>
       </main>
