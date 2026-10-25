@@ -7,7 +7,7 @@ import { useAccount, useReadContract, useSwitchChain, useWriteContract } from 'w
 import { waitForTransactionReceipt } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
 import { parseSpec, useIsAdmin } from '../chain'
-import { FACTORY, USDC, factoryAbi } from '../contracts'
+import { CHAINLINK_RESOLVER, FACTORY, OPTIMISTIC_RESOLVER, USDC, factoryAbi } from '../contracts'
 import { categories, type Category } from '../mock'
 import { useWallet } from '../wallet'
 import { config } from '../wagmi'
@@ -17,6 +17,14 @@ const FIFTY_FIFTY_BPS = 5_000
 // Mirrors MarketFactory.MIN_LIQUIDITY.
 const MIN_LIQUIDITY = 10
 const USDC_DECIMALS = 6
+
+// How the market settles: a resolver contract, or a wallet that resolves by hand.
+const RESOLUTIONS = {
+  optimistic: { label: 'AI bot + disputes (Optimistic)', hint: 'The bot proposes from the source URL after close; anyone can dispute; the judge rules.' },
+  chainlink: { label: 'Chainlink price feed', hint: 'Configure the feed before close or the market cancels. CreateMarket.s.sol does both in one go.' },
+  custom: { label: 'Custom address', hint: 'That wallet resolves YES or NO itself. Defaults to yours.' },
+} as const
+type Resolution = keyof typeof RESOLUTIONS
 
 type Step = 'idle' | 'approving' | 'creating' | 'failed'
 
@@ -37,7 +45,8 @@ export default function Admin() {
   const [sourceUrl, setSourceUrl] = useState('')
   const [closesAt, setClosesAt] = useState('')
   const [liquidity, setLiquidity] = useState('100')
-  const [arbitrator, setArbitrator] = useState('')
+  const [resolution, setResolution] = useState<Resolution>('optimistic')
+  const [customArbitrator, setCustomArbitrator] = useState('')
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState('')
 
@@ -68,7 +77,11 @@ export default function Admin() {
   const closeTime = closesAt ? Math.floor(new Date(closesAt).getTime() / 1000) : 0
   const liquidityAmount = Number(liquidity) || 0
   const liquidityRaw = liquidityAmount > 0 ? parseUnits(liquidity, USDC_DECIMALS) : 0n
-  const arbitratorAddress = (arbitrator.trim() || wallet.address) as Address
+  const arbitratorAddress = {
+    optimistic: OPTIMISTIC_RESOLVER,
+    chainlink: CHAINLINK_RESOLVER,
+    custom: (customArbitrator.trim() || wallet.address) as Address,
+  }[resolution]
   const needsApproval = allowance < liquidityRaw
   const busy = step === 'approving' || step === 'creating'
 
@@ -168,8 +181,16 @@ export default function Admin() {
             />,
             `Balance ${wallet.usdc == null ? '—' : wallet.usdc} USDC`,
           )}
-          {label('Arbitrator', <input placeholder={wallet.address} value={arbitrator} onChange={(e) => setArbitrator(e.target.value)} className={field} />, 'Defaults to your wallet')}
+          {label(
+            'Resolution',
+            <select value={resolution} onChange={(e) => setResolution(e.target.value as Resolution)} className={field}>
+              {Object.entries(RESOLUTIONS).map(([value, { label }]) => <option key={value} value={value}>{label}</option>)}
+            </select>,
+            RESOLUTIONS[resolution].hint,
+          )}
         </div>
+        {resolution === 'custom' &&
+          label('Arbitrator address', <input placeholder={wallet.address} value={customArbitrator} onChange={(e) => setCustomArbitrator(e.target.value)} className={field} />)}
       </fieldset>
 
       <button
