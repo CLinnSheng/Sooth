@@ -50,7 +50,8 @@ export default function Market() {
   const mine = positions.filter((pos) => pos.marketId === market.id)
   const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
-  const now = Date.now() / 1000
+  // The last history point is stamped when markets load, so the page and chart share one clock.
+  const now = market.history.at(-1)!.at
   const age = now - market.history[0].at
   // A range at least as long as the market's life would just repeat All.
   const available = (Object.keys(ranges) as (keyof typeof ranges)[]).filter((r) => ranges[r] < age || r === 'All')
