@@ -2,6 +2,11 @@
 contracts/out/
 contracts/cache/
 
+# Python (bot/)
+.venv/
+__pycache__/
+.pytest_cache/
+
 # Foundry deploy logs: keep testnet deployments (they record contract addresses), ignore local anvil runs and dry runs
 contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
