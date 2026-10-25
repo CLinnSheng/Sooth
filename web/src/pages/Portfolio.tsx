@@ -1,4 +1,4 @@
-import { ArrowUpRight, LoaderCircle, Wallet } from 'lucide-react'
+import { ArrowUpRight, ChevronRight, LoaderCircle, Wallet } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { erc20Abi, formatUnits, isAddress, zeroAddress } from 'viem'
@@ -177,9 +177,9 @@ export default function Portfolio() {
                   <td className="p-4 text-right">{usdc(t.shares)} @ {cents(t.amount / t.shares)}</td>
                   <td className="p-4 text-right">{usdc(t.amount)} USDC</td>
                   <td className="p-4">
-                    <a href={basescanTx(t.tx)} target="_blank" rel="noreferrer" aria-label="View transaction" className="text-muted hover:text-white">
-                      <ArrowUpRight size={14} />
-                    </a>
+                    <Link to={`/market/${t.marketId}`} aria-label="Open market" className="text-muted hover:text-white">
+                      <ChevronRight size={14} />
+                    </Link>
                   </td>
                 </tr>
               ))}
