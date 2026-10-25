@@ -102,6 +102,7 @@ export const optimisticResolverAbi = parseAbi([
 
 // Comparison: 0 Below, 1 Above (strict); a price equal to the threshold resolves NO.
 export const chainlinkResolverAbi = parseAbi([
+  'function configure(address market, (address feed, int256 threshold, uint8 comparison, uint64 maxStaleness) config)',
   'function resolve(address market, uint80 roundId)',
   'function configOf(address market) view returns ((address feed, int256 threshold, uint8 comparison, uint64 maxStaleness))',
   'event PriceResolved(address indexed market, uint80 roundId, int256 price, uint8 outcome)',
@@ -111,6 +112,11 @@ export const chainlinkResolverAbi = parseAbi([
   'error RoundSuperseded(uint80 roundId, uint256 nextUpdatedAt)',
   'error StalePrice(uint256 updatedAt, uint64 closeTime)',
   'error InvalidPrice(int256 answer)',
+  'error InvalidConfig()',
+  'error MarketNotUsingResolver(address market)',
+  'error AlreadyConfigured(address market)',
+  'error ConfigureAfterClose(address market)',
+  'error OwnableUnauthorizedAccount(address account)',
   // Bubbled up from Market.resolve when someone resolved first.
   'error CannotResolve(uint8 currentState)',
 ])

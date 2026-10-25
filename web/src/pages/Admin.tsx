@@ -8,7 +8,7 @@ import { waitForTransactionReceipt } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
 import { parseSpec, useIsAdmin } from '../chain'
 import { AdminTabs } from '../components'
-import { CHAINLINK_RESOLVER, FACTORY, OPTIMISTIC_RESOLVER, USDC, factoryAbi } from '../contracts'
+import { CHAINLINK_RESOLVER, FACTORY, OPTIMISTIC_RESOLVER, USDC, chainlinkResolverAbi, factoryAbi } from '../contracts'
 import { categories, type Category } from '../mock'
 import { useWallet } from '../wallet'
 import { config } from '../wagmi'
@@ -22,12 +22,19 @@ const USDC_DECIMALS = 6
 // How the market settles: a resolver contract, or a wallet that resolves by hand.
 const RESOLUTIONS = {
   optimistic: { label: 'AI bot + disputes (Optimistic)', hint: 'The bot proposes from the source URL after close; anyone can dispute; the judge rules.' },
-  chainlink: { label: 'Chainlink price feed', hint: 'Configure the feed before close or the market cancels. CreateMarket.s.sol does both in one go.' },
+  chainlink: { label: 'Chainlink price feed', hint: 'Settles automatically from the feed at close, against the threshold below.' },
   custom: { label: 'Custom address', hint: 'That wallet resolves YES or NO itself. Defaults to yours.' },
 } as const
 type Resolution = keyof typeof RESOLUTIONS
 
-type Step = 'idle' | 'approving' | 'creating' | 'failed'
+// Chainlink feeds on Base Sepolia the form offers; the resolver accepts any AggregatorV3 feed.
+const FEEDS = { 'ETH / USD': { address: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1', decimals: 8 } } as const
+type FeedName = keyof typeof FEEDS
+const COMPARISONS = { above: 1, below: 0 } as const // IChainlinkResolver.Comparison
+// Oldest the price at close may be; CreateMarket.s.sol's default.
+const MAX_STALENESS_SECS = 3_600n
+
+type Step = 'idle' | 'approving' | 'creating' | 'configuring' | 'failed'
 
 const field = 'w-full rounded-xl bg-raised px-3 py-2.5 text-sm outline-none ring-white/30 focus:ring-1'
 
@@ -48,6 +55,11 @@ export default function Admin() {
   const [liquidity, setLiquidity] = useState('100')
   const [resolution, setResolution] = useState<Resolution>('optimistic')
   const [customArbitrator, setCustomArbitrator] = useState('')
+  const [feedName, setFeedName] = useState<FeedName>('ETH / USD')
+  const [threshold, setThreshold] = useState('')
+  const [comparison, setComparison] = useState<keyof typeof COMPARISONS>('above')
+  // Created but not yet configured (second popup rejected or failed): Retry sends only configure.
+  const [unconfigured, setUnconfigured] = useState<{ id: bigint; address: Address } | null>(null)
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState('')
 
@@ -84,11 +96,36 @@ export default function Admin() {
     custom: (customArbitrator.trim() || wallet.address) as Address,
   }[resolution]
   const needsApproval = allowance < liquidityRaw
-  const busy = step === 'approving' || step === 'creating'
+  const busy = step === 'approving' || step === 'creating' || step === 'configuring'
+  const feed = FEEDS[feedName]
+  const thresholdRaw = Number(threshold) > 0 ? parseUnits(threshold, feed.decimals) : 0n
 
-  const create = async () => {
-    const confirm = (hash: Hex) => waitForTransactionReceipt(config, { hash })
+  const confirm = (hash: Hex) => waitForTransactionReceipt(config, { hash })
+  const open = async (marketId: bigint) => {
+    // refetchQueries also runs inactive queries, so the market page opens with the new market loaded.
+    await queryClient.refetchQueries({ queryKey: ['markets'] })
+    navigate(`/market/${marketId}`)
+  }
+  const configureFeed = async (market: Address) => {
+    setStep('configuring')
+    const feedConfig = { feed: feed.address, threshold: thresholdRaw, comparison: COMPARISONS[comparison], maxStaleness: MAX_STALENESS_SECS }
+    await confirm(await writeContractAsync({ address: CHAINLINK_RESOLVER, abi: chainlinkResolverAbi, functionName: 'configure', args: [market, feedConfig] }))
+  }
+  const run = async (steps: () => Promise<void>) => {
     try {
+      await steps()
+    } catch (e) {
+      // A wallet rejection is the user's choice, not an error worth showing.
+      if (e instanceof BaseError && e.walk((x) => x instanceof UserRejectedRequestError)) return setStep('idle')
+      setError(e instanceof BaseError ? e.shortMessage : e instanceof Error ? e.message : 'Transaction failed')
+      setStep('failed')
+    } finally {
+      queryClient.invalidateQueries({ queryKey: ['readContract'] })
+    }
+  }
+
+  const create = () =>
+    run(async () => {
       if (needsApproval) {
         setStep('approving')
         await confirm(await writeContractAsync({ address: USDC, abi: erc20Abi, functionName: 'approve', args: [FACTORY, liquidityRaw] }))
@@ -111,25 +148,26 @@ export default function Admin() {
         }),
       )
       const [created] = parseEventLogs({ abi: factoryAbi, eventName: 'MarketCreated', logs: receipt.logs })
-      // refetchQueries also runs inactive queries, so the market page opens with the new market loaded.
-      await queryClient.refetchQueries({ queryKey: ['markets'] })
-      navigate(`/market/${created.args.marketId}`)
-    } catch (e) {
-      // A wallet rejection is the user's choice, not an error worth showing.
-      if (e instanceof BaseError && e.walk((x) => x instanceof UserRejectedRequestError)) return setStep('idle')
-      setError(e instanceof BaseError ? e.shortMessage : e instanceof Error ? e.message : 'Transaction failed')
-      setStep('failed')
-    } finally {
-      queryClient.invalidateQueries({ queryKey: ['readContract'] })
-    }
-  }
+      if (resolution === 'chainlink') {
+        // The market exists from here on, so a failed configure must be retryable on its own.
+        setUnconfigured({ id: created.args.marketId, address: created.args.market })
+        await configureFeed(created.args.market)
+      }
+      await open(created.args.marketId)
+    })
+  const retryConfigure = (market: { id: bigint; address: Address }) =>
+    run(async () => {
+      await configureFeed(market.address)
+      await open(market.id)
+    })
 
   const isFormValid =
     isSpecValid &&
     closeTime > Date.now() / 1000 &&
     liquidityAmount >= MIN_LIQUIDITY &&
     liquidityAmount <= (wallet.usdc ?? 0) &&
-    isAddress(arbitratorAddress)
+    isAddress(arbitratorAddress) &&
+    (resolution !== 'chainlink' || thresholdRaw > 0n)
 
   let action: { label: ReactNode; onClick?: () => void; disabled?: boolean }
   if (!chain)
@@ -140,6 +178,8 @@ export default function Admin() {
     }
   else if (step === 'approving') action = { label: <><LoaderCircle size={16} className="animate-spin" /> Approving USDC…</>, disabled: true }
   else if (step === 'creating') action = { label: <><LoaderCircle size={16} className="animate-spin" /> Creating market…</>, disabled: true }
+  else if (step === 'configuring') action = { label: <><LoaderCircle size={16} className="animate-spin" /> Setting price feed…</>, disabled: true }
+  else if (unconfigured) action = { label: 'Set price feed', onClick: () => retryConfigure(unconfigured) }
   else action = { label: 'Approve', onClick: create, disabled: !isFormValid }
 
   const label = (text: string, input: ReactNode, hint?: string) => (
@@ -194,6 +234,34 @@ export default function Admin() {
           </div>
           {resolution === 'custom' &&
             label('Arbitrator address', <input placeholder={wallet.address} value={customArbitrator} onChange={(e) => setCustomArbitrator(e.target.value)} className={field} />)}
+          {resolution === 'chainlink' && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              {label(
+                'Feed',
+                <select value={feedName} onChange={(e) => setFeedName(e.target.value as FeedName)} className={field}>
+                  {Object.keys(FEEDS).map((name) => <option key={name}>{name}</option>)}
+                </select>,
+              )}
+              {label(
+                'YES if price is',
+                <select value={comparison} onChange={(e) => setComparison(e.target.value as keyof typeof COMPARISONS)} className={field}>
+                  <option value="above">Above</option>
+                  <option value="below">Below</option>
+                </select>,
+              )}
+              {label(
+                'Threshold',
+                <input
+                  inputMode="decimal"
+                  placeholder="2300.00"
+                  value={threshold}
+                  onChange={(e) => { if (/^\d*\.?\d{0,8}$/.test(e.target.value)) setThreshold(e.target.value) }}
+                  className={field}
+                />,
+                'Exactly equal resolves NO',
+              )}
+            </div>
+          )}
         </fieldset>
 
         <button
@@ -203,6 +271,12 @@ export default function Admin() {
         >
           {action.label}
         </button>
+        {unconfigured && step !== 'configuring' && (
+          <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-no-soft px-3 py-2 text-sm text-no">
+            <TriangleAlert size={15} className="shrink-0" /> Market #{unconfigured.id.toString()} was created but its price feed isn't
+            set. Set it before close, or the market cancels.
+          </p>
+        )}
         {step === 'failed' && (
           <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-no-soft px-3 py-2 text-sm text-no">
             <TriangleAlert size={15} className="shrink-0" /> {error}

@@ -7,7 +7,7 @@ import { useAccount, useReadContract } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { ClaimButton, PAGE_SIZE, ShowMore } from '../components'
 import { USDC } from '../contracts'
-import { ago, basescanAddr, basescanTx, cents, isSettled, positionValue, priceOf, shortAddr, signed, usdc } from '../mock'
+import { ago, basescanAddr, cents, isSettled, positionValue, priceOf, shortAddr, signed, usdc } from '../mock'
 
 // /portfolio is the connected wallet; /portfolio/:address is anyone's, read-only from public chain data.
 export default function Portfolio() {
