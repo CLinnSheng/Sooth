@@ -31,6 +31,7 @@ export type Market = {
   liquidityWithdrawn: boolean
   request?: ResolutionRequest // absent until someone proposes
   priceResolution?: { roundId: bigint; price: bigint } // Chainlink markets: the round and raw answer they settled on
+  collected: { fees: number; liquidity: number } // USDC already paid out to the creator
   // CPMM pool reserves of outcome shares. YES price = noReserve / (yesReserve + noReserve).
   yesReserve: number
   noReserve: number

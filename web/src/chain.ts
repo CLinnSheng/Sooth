@@ -60,6 +60,8 @@ const soothEvents = [
   getAbiItem({ abi: factoryAbi, name: 'MarketCreated' }),
   getAbiItem({ abi: marketAbi, name: 'Bought' }),
   getAbiItem({ abi: marketAbi, name: 'Sold' }),
+  getAbiItem({ abi: marketAbi, name: 'FeesWithdrawn' }),
+  getAbiItem({ abi: marketAbi, name: 'LiquidityWithdrawn' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Proposed' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Disputed' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Finalized' }),
@@ -74,7 +76,10 @@ type SoothLog = Awaited<ReturnType<typeof scanLogs>>[number]
 type CreatedLog = Extract<SoothLog, { eventName: 'MarketCreated' }>
 type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
 type PriceLog = Extract<SoothLog, { eventName: 'PriceResolved' }>
-type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog>
+type PayoutLog = Extract<SoothLog, { eventName: 'FeesWithdrawn' | 'LiquidityWithdrawn' }>
+type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog>
+// Everything the scan found for one market, besides its MarketCreated.
+type MarketLogs = { trades: TradeLog[]; request: ResolverLog[]; price?: PriceLog; payouts: PayoutLog[] }
 
 // Outcome shares use the collateral's 6 decimals.
 const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
@@ -149,10 +154,12 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
   const tradeLogs: TradeLog[] = []
   const resolverLogs: ResolverLog[] = []
   const priceLogs: PriceLog[] = []
+  const payoutLogs: PayoutLog[] = []
   for (const log of scan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
     else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
     else if (log.eventName === 'PriceResolved') priceLogs.push(log)
+    else if (log.eventName === 'FeesWithdrawn' || log.eventName === 'LiquidityWithdrawn') payoutLogs.push(log)
     else resolverLogs.push(log)
   }
 
@@ -160,11 +167,16 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
     const id = i + 1
     const createdLog = created.get(id)
     if (!createdLog) throw new Error(`MarketCreated log missing for market ${id}`)
-    const logs = tradeLogs.filter((log) => idByAddress.get(log.address.toLowerCase()) === id)
+    const emittedHere = (log: SoothLog) => idByAddress.get(log.address.toLowerCase()) === id
     // Resolver events name the market in an argument; the log's own address is the resolver.
-    const requestLogs = resolverLogs.filter((log) => log.args.market.toLowerCase() === state.address.toLowerCase())
-    const priceLog = priceLogs.find((log) => log.args.market.toLowerCase() === state.address.toLowerCase())
-    return toMarket(id, state, createdLog, logs, requestLogs, priceLog, parseSpec(createdLog.args.spec))
+    const aboutHere = (log: ResolverLog | PriceLog) => log.args.market.toLowerCase() === state.address.toLowerCase()
+    const logs: MarketLogs = {
+      trades: tradeLogs.filter(emittedHere),
+      request: resolverLogs.filter(aboutHere),
+      price: priceLogs.find(aboutHere),
+      payouts: payoutLogs.filter(emittedHere),
+    }
+    return toMarket(id, state, createdLog, logs, parseSpec(createdLog.args.spec))
   })
   const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
   return { markets, trades }
@@ -231,19 +243,13 @@ export function parseSpec(json: string): Spec | null {
   return isValid ? { question, rules, category: category as Category, source: { label, url } } : null
 }
 
-function toMarket(
-  id: number,
-  state: MarketState,
-  created: CreatedLog,
-  logs: TradeLog[],
-  requestLogs: ResolverLog[],
-  priceLog: PriceLog | undefined,
-  spec: Spec | null,
-): Market {
+function toMarket(id: number, state: MarketState, created: CreatedLog, logs: MarketLogs, spec: Spec | null): Market {
   const yesReserve = toUnits(state.yesPool)
   const noReserve = toUnits(state.noPool)
-  const volume = logs.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
-  const prices = replayPrices(created.args.initialLiquidity, logs)
+  const volume = logs.trades.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
+  const prices = replayPrices(created.args.initialLiquidity, logs.trades)
+  const paid = (event: PayoutLog['eventName']) =>
+    toUnits(logs.payouts.filter((log) => log.eventName === event).reduce((sum, log) => sum + log.args.amount, 0n))
   return {
     id,
     address: state.address,
@@ -259,8 +265,9 @@ function toMarket(
     // winningOutcome reads as Yes (0) until resolution, so it only counts once Resolved.
     resolvedOutcome: state.state === STATE_RESOLVED ? OUTCOMES[state.winningOutcome] : undefined,
     liquidityWithdrawn: state.liquidityWithdrawn,
-    request: replayRequest(requestLogs),
-    priceResolution: priceLog && { roundId: priceLog.args.roundId, price: priceLog.args.price },
+    request: replayRequest(logs.request),
+    priceResolution: logs.price && { roundId: logs.price.args.roundId, price: logs.price.args.price },
+    collected: { fees: paid('FeesWithdrawn'), liquidity: paid('LiquidityWithdrawn') },
     yesReserve,
     noReserve,
     volume: toUnits(volume),

@@ -38,15 +38,19 @@ export const marketAbi = parseAbi([
   'function winningOutcome() view returns (uint8)',
   'function creator() view returns (address)',
   'function liquidityWithdrawn() view returns (bool)',
+  'function accruedFees() view returns (uint256)',
   'function quoteBuy(uint8 outcome, uint256 collateralIn) view returns (uint256 sharesOut, uint256 fee)',
   'function quoteSell(uint8 outcome, uint256 sharesIn) view returns (uint256 collateralOut, uint256 fee)',
   'function buy(uint8 outcome, uint256 collateralIn, uint256 minSharesOut, uint256 deadline) returns (uint256 sharesOut)',
   'function sell(uint8 outcome, uint256 sharesIn, uint256 minCollateralOut, uint256 deadline) returns (uint256 collateralOut)',
   'function redeem() returns (uint256 payout)',
   'function withdrawLiquidity() returns (uint256 amount)',
+  'function withdrawFees() returns (uint256 amount)',
   'function resolve(uint8 outcome)',
   'event Bought(address indexed trader, uint8 indexed outcome, uint256 collateralIn, uint256 sharesOut, uint256 fee)',
   'event Sold(address indexed trader, uint8 indexed outcome, uint256 sharesIn, uint256 collateralOut, uint256 fee)',
+  'event FeesWithdrawn(address indexed recipient, uint256 amount)',
+  'event LiquidityWithdrawn(address indexed recipient, uint256 amount)',
   'error InsufficientOutput(uint256 actual, uint256 minimum)',
   'error TradingClosed(uint8 currentState)',
   'error DeadlineExpired(uint256 deadline, uint256 currentTime)',
@@ -55,6 +59,8 @@ export const marketAbi = parseAbi([
   'error LiquidityAlreadyWithdrawn()',
   'error NotArbitrator(address caller)',
   'error CannotResolve(uint8 currentState)',
+  'error NoFeesToWithdraw()',
+  'error TradingStillOpen()',
 ])
 
 export const outcomeTokenAbi = parseAbi([
