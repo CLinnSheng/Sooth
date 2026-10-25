@@ -106,7 +106,7 @@ One YES slip and one NO slip together are worth exactly 1 USDC, because one of t
 
 ### What is not built yet
 
-Markets support constant-product YES/NO trading with 1% fees accrued for the platform wallet recorded as creator. After trading closes, anyone can call `withdrawFees()` to pay the creator. Resolution, redemption, and liquidity withdrawal are not implemented yet. Use test collateral until the full lifecycle exists.
+Markets support the full lifecycle: trading, resolution by the arbitrator, redemption, and liquidity and fee withdrawal for the creator. Resolver contracts (Chainlink, optimistic/AI proposer) are not built yet, so the arbitrator is a wallet that calls `resolve()` by hand. Use test collateral until those exist.
 
 ---
 
@@ -191,7 +191,7 @@ struct CreateParams {
 
 There is no `collateral` field: every market uses the single token (USDC) fixed in the factory at deployment.
 
-There is no fee or resolution deadline input. Every trade pays a flat 1% (`Market.FEE_BPS = 100`), accrued for the market creator and withdrawable after trading closes. The resolution deadline is `closeTime + 7 days` (`Market.RESOLUTION_WINDOW`); resolution and redemption behavior is not implemented yet.
+There is no fee or resolution deadline input. Every trade pays a flat 1% (`Market.FEE_BPS = 100`), accrued for the market creator and withdrawable after trading closes. The resolution deadline is `closeTime + 7 days` (`Market.RESOLUTION_WINDOW`); a market not resolved by then is cancelled (see 3.5).
 
 `uint64` and `uint16` are smaller number types. They're big enough for timestamps and percentages, and the compiler can pack them together to save storage.
 
@@ -286,7 +286,7 @@ function mint(address to, uint256 id, uint256 amount) external onlyMarketOf(id) 
 - A **modifier** is a reusable check that runs before the function body. `_;` means "now run the function".
 - This is the key security rule of the token: **Market #1 can only mint Market #1's tokens.** Even if Market #1 had a bug, it couldn't create tokens for Market #2. A test checks exactly this (`test_RevertWhen_MarketMintsAnotherMarketsToken`).
 - `mintBatch` does the same check for every ID in the list, then mints them all in one call. Market creation uses it to mint YES and NO together, which is cheaper than two separate `mint` calls.
-- `burn` isn't used yet. It's for redeeming tokens after resolution (E3-2), and it's in the interface now so the signature doesn't change later.
+- `burnBatch` is used by `redeem` and `withdrawLiquidity` to destroy shares as they are paid out, so a share can never be paid twice.
 
 ### 3.5 `Market.sol`: one prediction market
 
@@ -364,18 +364,22 @@ function initialize(InitParams calldata p) external initializer {
 - **The balance check** is a safety net. The market refuses to start unless it actually received the USDC, so it can never mint tokens backed by nothing. It uses `>=`, not `==`, on purpose. Clone addresses are predictable, so with `==` anyone could block market creation by sending 1 unit of USDC to the next market's address first. With `>=`, a stray donation only strands the donor's own money.
 - **Seeding works like this.** The core rule of the design is *1 YES + 1 NO = 1 USDC*, because exactly one of them will be worth 1 USDC at the end. So 100 USDC in means 100 YES and 100 NO minted into the pool. The pool is equal, so the price is 50/50 (Q3).
 
-#### `state()`: the derived "Closed" state
+#### `state()`: the derived "Closed" and "Cancelled" states
 
 ```solidity
 function state() public view returns (State) {
-    if (_state == State.Open && block.timestamp >= closeTime) return State.Closed;
-    return _state;
+    if (_state != State.Open) return _state;
+    if (block.timestamp >= resolutionDeadline()) return State.Cancelled;
+    if (block.timestamp >= closeTime) return State.Closed;
+    return State.Open;
 }
 ```
 
 - `block.timestamp` is the current block's time in unix seconds.
 - `view` means it only reads data. Calling it from the frontend is free.
 - Nobody needs to send a "close the market" transaction. As soon as the time passes, `state()` reports `Closed`; buy and sell functions require `state() == Open`.
+- The same goes for cancelling. If the arbitrator hasn't resolved by `closeTime + 7 days`, `state()` reports `Cancelled`. No keeper or transaction is needed, so funds can never get stuck because someone forgot to act.
+- Only `Resolved` is ever written by a transaction. Once written it wins over the clock, so a resolved market never turns into a cancelled one.
 
 #### Prices
 
@@ -388,6 +392,25 @@ function priceYes() external view returns (uint256) {
 - This is the AMM formula from the backlog: `P(YES) = NO_pool / (YES_pool + NO_pool)`.
 - **Why `* 1e18`?** There are no decimals in Solidity, and `100 / 200` would give 0. Multiplying first gives `0.5 × 10^18 = 500000000000000000`, which the frontend divides by 10^18 to show "50%". This "18-decimal fixed point" convention is used across Ethereum.
 - **Why the *NO* pool is on top:** when someone buys YES, YES tokens leave the pool, so the YES pool gets smaller relative to NO. YES becomes scarce and its price goes up.
+
+#### Resolution and payout
+
+| Function | Who | When | What it does |
+|---|---|---|---|
+| `resolve(outcome)` | arbitrator only | `Closed` (after close, before the deadline) | Stores the winning outcome and sets `Resolved`. Can't be called twice |
+| `redeem()` | any holder | `Resolved` or `Cancelled` | Burns all the caller's YES and NO shares and pays for them |
+| `withdrawLiquidity()` | anyone, pays `creator` | `Resolved` or `Cancelled` | Burns the pool's own shares and pays the creator what they're worth. Once only |
+
+Payout rates, shared by `redeem` and `withdrawLiquidity` (`_settlementValue`):
+
+- **Resolved:** each winning share pays 1 USDC, each losing share pays 0.
+- **Cancelled:** each YES or NO share pays 0.5 USDC, rounded down per call.
+
+Why the contract can always pay everyone: every YES was minted together with a NO for 1 USDC, so total YES = total NO = the USDC backing them. If YES wins, holders plus the pool own exactly that many YES. If cancelled, all shares together are worth half of 2× the backing. Rounding down means at most a few raw units of dust stay behind, never a shortfall. Fees (`accruedFees`) are kept separate and paid by `withdrawFees()`.
+
+Example: the creator seeds 100 USDC, Alice buys YES for 50, Bob buys NO for 30. If cancelled, Alice gets 41.30, Bob 37.84 and the creator 100.06 plus 0.80 in fees. It's not a refund: it settles as if the probability were 50%.
+
+`withdrawLiquidity()` leaves `yesPool`/`noPool` unchanged after burning, so `priceYes()` still shows the final price.
 
 ### 3.6 `MarketFactory.sol`: the main contract
 
@@ -640,7 +663,7 @@ Deployed with `DeployMarketFactory.s.sol`, then used `cast` against the live loc
 
 ### Not covered yet (needs later epics)
 
-- End-to-end lifecycle test through resolution and redemption still needs those settlement functions.
+- End-to-end lifecycle is covered by `test/MarketResolution.t.sol`, including a fuzz test that every holder and the creator can exit with only dust left.
 - Stateful `invariant_` tests become meaningful once trading exists.
 - Reentrancy tests with a malicious token matter once trading and redemption move funds to users.
 
@@ -668,6 +691,5 @@ Together these cut market creation gas by about 92k (−13.6%).
 
 | Issue | Why |
 |---|---|
-| Seed liquidity has no withdrawal path yet | Resolution, redemption, and liquidity withdrawal are not implemented yet; accrued trading fees can be withdrawn to the creator after close |
 | Balance check is `>=`, so tokens sent to the address early are counted | Using `==` would let anyone block creation by sending 1 unit to the predictable next market address. With `>=`, a stray donation only strands the donor's own money |
 | `OutcomeToken` stores the owner for both the YES and NO IDs (2 writes) | Removing it saves about 22k gas but needs an awkward mint signature, because a hashed token ID can't be turned back into a market ID |

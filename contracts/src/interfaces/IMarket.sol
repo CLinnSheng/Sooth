@@ -9,8 +9,8 @@ import {IOutcomeToken} from "./IOutcomeToken.sol";
 ///         deployed and initialized by MarketFactory in one transaction.
 /// @dev Amounts are raw collateral units: 1e6 is one USDC or one whole outcome share.
 interface IMarket {
-    /// @dev `Closed` is never stored. It is derived from `closeTime` in `state()`, so no
-    ///      transaction is needed to close a market.
+    /// @dev `Closed` and `Cancelled` are never stored. They are derived from `closeTime` in
+    ///      `state()`, so no transaction is needed to close or cancel a market.
     enum State {
         Open,
         Closed,
@@ -36,6 +36,9 @@ interface IMarket {
     event Bought(address indexed trader, Outcome indexed outcome, uint256 collateralIn, uint256 sharesOut, uint256 fee);
     event Sold(address indexed trader, Outcome indexed outcome, uint256 sharesIn, uint256 collateralOut, uint256 fee);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
+    event MarketResolved(Outcome indexed outcome);
+    event Redeemed(address indexed holder, uint256 payout);
+    event LiquidityWithdrawn(address indexed recipient, uint256 amount);
 
     error NotFactory(address caller);
     error CollateralNotReceived(uint256 expected, uint256 actual);
@@ -46,6 +49,11 @@ interface IMarket {
     error ZeroOutput();
     error DeadlineExpired(uint256 deadline, uint256 currentTime);
     error InsufficientOutput(uint256 actual, uint256 minimum);
+    error NotArbitrator(address caller);
+    error CannotResolve(State currentState);
+    error NotSettled(State currentState);
+    error NothingToRedeem();
+    error LiquidityAlreadyWithdrawn();
 
     /// @notice Called once, only by the factory, right after cloning. Mints the seed YES/NO
     ///         pairs into the pool; the factory must have transferred `initialLiquidity` first.
@@ -68,13 +76,25 @@ interface IMarket {
     /// @notice Anyone may trigger withdrawal once trading ends; fees are always sent to creator.
     function withdrawFees() external returns (uint256 amount);
 
+    /// @notice Only the arbitrator, only while `Closed` (after close, before the resolution
+    ///         deadline). After the deadline the market is `Cancelled` instead.
+    function resolve(Outcome outcome) external;
+
+    /// @notice Burns the caller's shares and pays collateral. `Resolved`: 1 unit per winning
+    ///         share, losing shares pay nothing. `Cancelled`: half a unit per YES or NO share.
+    function redeem() external returns (uint256 payout);
+
+    /// @notice Pays the creator what the pool's own shares are worth after settlement, at the
+    ///         same rates as `redeem`. Anyone may trigger it.
+    function withdrawLiquidity() external returns (uint256 amount);
+
     /// @notice Implied probability of YES, 18 decimals: noPool / (yesPool + noPool).
     function priceYes() external view returns (uint256);
 
     /// @notice Implied probability of NO, 18 decimals: yesPool / (yesPool + noPool).
     function priceNo() external view returns (uint256);
 
-    /// @notice closeTime + RESOLUTION_WINDOW. After this, an unresolved market can be cancelled.
+    /// @notice closeTime + RESOLUTION_WINDOW. From this time, an unresolved market is cancelled.
     function resolutionDeadline() external view returns (uint64);
 
     /// @notice What `buy` would return now. Reverts once trading is closed.
@@ -99,4 +119,7 @@ interface IMarket {
     function yesPool() external view returns (uint256);
     function noPool() external view returns (uint256);
     function accruedFees() external view returns (uint256);
+    /// @notice Only meaningful when `state()` is `Resolved`.
+    function winningOutcome() external view returns (Outcome);
+    function liquidityWithdrawn() external view returns (bool);
 }
