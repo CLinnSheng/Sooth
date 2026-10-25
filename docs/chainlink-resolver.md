@@ -21,6 +21,13 @@ RESOLVER=$RESOLVER MARKET=$MARKET forge script script/ResolveChainlinkMarket.s.s
 `THRESHOLD` is in feed decimals (8 for USD). `below`: YES if price < threshold; `above`: YES if
 price > threshold. **Ties resolve NO.** Config is write-once and locked at close.
 
+## Web and bot
+
+- The bot resolves closed markets within one poll. The market page's Resolution card shows the feed
+  condition, a Resolve fallback (same round search) and the settled price.
+- Admin → Create market → Resolution: *Chainlink price feed* only sets the arbitrator. Configure the
+  feed before close, or create with `CreateMarket.s.sol`, which does both.
+
 ## Settlement price
 
 The last round written at or before `closeTime`, i.e. what the feed returned at that second. The

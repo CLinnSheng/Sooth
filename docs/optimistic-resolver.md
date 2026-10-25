@@ -21,6 +21,14 @@ cast send $RESOLVER "rule(address,uint8)" $MARKET 0                  # judge, di
 cast send $RESOLVER "refund(address)" $MARKET                        # market cancelled with a request open
 ```
 
+## Web and bot
+
+- Admin → Create market → Resolution: *AI bot + disputes* sets this resolver as the arbitrator.
+- The bot (`bot/`) proposes after close from the spec's source page, with its quotes as a `data:` URI
+  in `Proposed`, and finalizes after an undisputed window. See `bot/README.md`.
+- The market page's Resolution card shows the request and its evidence, and offers whichever action
+  the resolver accepts now: propose, dispute, finalize, rule (judge wallet only), refund.
+
 ## Rules
 
 | Path | Bonds |
