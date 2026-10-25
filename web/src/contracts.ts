@@ -10,6 +10,8 @@ export const DEPLOY_BLOCK = 50_040_022n
 export const OUTCOME_TOKEN: Address = '0xA2D1e9A1e195d01B1aC21090962B7F2AD76BDB5B'
 // Bonded-proposal resolver; its owner is the judge for disputes.
 export const OPTIMISTIC_RESOLVER: Address = '0xe37DB6692De70F5fe69fcABb64b7C737fA096335'
+// Price-feed resolver: settles on the Chainlink round live at close; anyone can trigger it.
+export const CHAINLINK_RESOLVER: Address = '0xAD3F05e6eFFeCD81278894266f5816691E704638'
 
 export const factoryAbi = parseAbi([
   'function marketCount() view returns (uint256)',
@@ -89,4 +91,27 @@ export const optimisticResolverAbi = parseAbi([
   // Bubbled up from the bond transfer, so a short balance or allowance reads as such.
   'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
   'error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)',
+])
+
+// Comparison: 0 Below, 1 Above (strict); a price equal to the threshold resolves NO.
+export const chainlinkResolverAbi = parseAbi([
+  'function resolve(address market, uint80 roundId)',
+  'function configOf(address market) view returns ((address feed, int256 threshold, uint8 comparison, uint64 maxStaleness))',
+  'event PriceResolved(address indexed market, uint80 roundId, int256 price, uint8 outcome)',
+  'error NotConfigured(address market)',
+  'error RoundNotFound(uint80 roundId)',
+  'error RoundAfterClose(uint80 roundId, uint256 updatedAt)',
+  'error RoundSuperseded(uint80 roundId, uint256 nextUpdatedAt)',
+  'error StalePrice(uint256 updatedAt, uint64 closeTime)',
+  'error InvalidPrice(int256 answer)',
+  // Bubbled up from Market.resolve when someone resolved first.
+  'error CannotResolve(uint8 currentState)',
+])
+
+// The subset of AggregatorV3Interface the page reads: feed name and scale, and round lookups for resolve.
+export const aggregatorAbi = parseAbi([
+  'function decimals() view returns (uint8)',
+  'function description() view returns (string)',
+  'function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
+  'function getRoundData(uint80 roundId) view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
 ])

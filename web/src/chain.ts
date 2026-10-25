@@ -13,7 +13,18 @@ import {
 import { useReadContract } from 'wagmi'
 import { getPublicClient } from 'wagmi/actions'
 import { baseSepolia } from 'wagmi/chains'
-import { DEPLOY_BLOCK, FACTORY, OPTIMISTIC_RESOLVER, OUTCOME_TOKEN, factoryAbi, marketAbi, optimisticResolverAbi, outcomeTokenAbi } from './contracts'
+import {
+  CHAINLINK_RESOLVER,
+  DEPLOY_BLOCK,
+  FACTORY,
+  OPTIMISTIC_RESOLVER,
+  OUTCOME_TOKEN,
+  chainlinkResolverAbi,
+  factoryAbi,
+  marketAbi,
+  optimisticResolverAbi,
+  outcomeTokenAbi,
+} from './contracts'
 import {
   categories,
   DAY_SECS,
@@ -54,6 +65,7 @@ const soothEvents = [
   getAbiItem({ abi: optimisticResolverAbi, name: 'Finalized' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Ruled' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Refunded' }),
+  getAbiItem({ abi: chainlinkResolverAbi, name: 'PriceResolved' }),
 ]
 
 type Spec = Pick<Market, 'question' | 'category' | 'rules' | 'source'>
@@ -61,7 +73,8 @@ type MarketState = Awaited<ReturnType<typeof readMarket>>
 type SoothLog = Awaited<ReturnType<typeof scanLogs>>[number]
 type CreatedLog = Extract<SoothLog, { eventName: 'MarketCreated' }>
 type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
-type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog>
+type PriceLog = Extract<SoothLog, { eventName: 'PriceResolved' }>
+type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog>
 
 // Outcome shares use the collateral's 6 decimals.
 const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
@@ -127,7 +140,7 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
   )
   const [states] = await Promise.all([
     Promise.all(addresses.map((address) => readMarket(address, blockNumber))),
-    extendScan([FACTORY, OPTIMISTIC_RESOLVER, ...addresses], blockNumber),
+    extendScan([FACTORY, OPTIMISTIC_RESOLVER, CHAINLINK_RESOLVER, ...addresses], blockNumber),
   ])
   await cacheBlockTimes(scan.logs)
 
@@ -135,9 +148,11 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
   const created = new Map<number, CreatedLog>()
   const tradeLogs: TradeLog[] = []
   const resolverLogs: ResolverLog[] = []
+  const priceLogs: PriceLog[] = []
   for (const log of scan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
     else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
+    else if (log.eventName === 'PriceResolved') priceLogs.push(log)
     else resolverLogs.push(log)
   }
 
@@ -148,7 +163,8 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
     const logs = tradeLogs.filter((log) => idByAddress.get(log.address.toLowerCase()) === id)
     // Resolver events name the market in an argument; the log's own address is the resolver.
     const requestLogs = resolverLogs.filter((log) => log.args.market.toLowerCase() === state.address.toLowerCase())
-    return toMarket(id, state, createdLog, logs, requestLogs, parseSpec(createdLog.args.spec))
+    const priceLog = priceLogs.find((log) => log.args.market.toLowerCase() === state.address.toLowerCase())
+    return toMarket(id, state, createdLog, logs, requestLogs, priceLog, parseSpec(createdLog.args.spec))
   })
   const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
   return { markets, trades }
@@ -215,7 +231,15 @@ export function parseSpec(json: string): Spec | null {
   return isValid ? { question, rules, category: category as Category, source: { label, url } } : null
 }
 
-function toMarket(id: number, state: MarketState, created: CreatedLog, logs: TradeLog[], requestLogs: ResolverLog[], spec: Spec | null): Market {
+function toMarket(
+  id: number,
+  state: MarketState,
+  created: CreatedLog,
+  logs: TradeLog[],
+  requestLogs: ResolverLog[],
+  priceLog: PriceLog | undefined,
+  spec: Spec | null,
+): Market {
   const yesReserve = toUnits(state.yesPool)
   const noReserve = toUnits(state.noPool)
   const volume = logs.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
@@ -236,6 +260,7 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
     resolvedOutcome: state.state === STATE_RESOLVED ? OUTCOMES[state.winningOutcome] : undefined,
     liquidityWithdrawn: state.liquidityWithdrawn,
     request: replayRequest(requestLogs),
+    priceResolution: priceLog && { roundId: priceLog.args.roundId, price: priceLog.args.price },
     yesReserve,
     noReserve,
     volume: toUnits(volume),

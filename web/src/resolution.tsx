@@ -1,8 +1,17 @@
 import { ArrowUpRight, LoaderCircle } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { erc20Abi, formatUnits, zeroAddress, type Address, type Hex } from 'viem'
-import { useAccount, useReadContracts } from 'wagmi'
-import { OPTIMISTIC_RESOLVER, USDC, marketAbi, optimisticResolverAbi } from './contracts'
+import { useAccount, useReadContract, useReadContracts } from 'wagmi'
+import { roundAtClose } from './chainlink'
+import {
+  CHAINLINK_RESOLVER,
+  OPTIMISTIC_RESOLVER,
+  USDC,
+  aggregatorAbi,
+  chainlinkResolverAbi,
+  marketAbi,
+  optimisticResolverAbi,
+} from './contracts'
 import { basescanAddr, shortAddr, usdc, type Market, type Outcome, type ResolutionRequest } from './mock'
 import { useTransaction } from './tx'
 
@@ -73,11 +82,17 @@ const SETTLED_TEXT = { finalized: 'Finalized: nobody disputed in time.', ruled: 
 
 // `now` is the page's load-time clock (unix seconds), so every check here uses one moment.
 export function ResolutionPanel({ market, now }: { market: Market; now: number }) {
-  const isOptimistic = market.arbitrator.toLowerCase() === OPTIMISTIC_RESOLVER.toLowerCase()
+  const arbitrator = market.arbitrator.toLowerCase()
   return (
     <div className="flex flex-col gap-3 rounded-3xl bg-surface p-5">
       <h2 className="font-semibold">Resolution</h2>
-      {isOptimistic ? <OptimisticResolution market={market} now={now} /> : <ArbitratorResolution market={market} />}
+      {arbitrator === OPTIMISTIC_RESOLVER.toLowerCase() ? (
+        <OptimisticResolution market={market} now={now} />
+      ) : arbitrator === CHAINLINK_RESOLVER.toLowerCase() ? (
+        <ChainlinkResolution market={market} />
+      ) : (
+        <ArbitratorResolution market={market} />
+      )}
     </div>
   )
 }
@@ -101,6 +116,63 @@ function ArbitratorResolution({ market }: { market: Market }) {
         <div className="flex gap-2">
           {OUTCOMES.map((o) => <ActionButton key={o} label={`Resolve ${o}`} onClick={() => resolve(o)} pending={tx.pending} />)}
         </div>
+      )}
+      <TxError error={tx.error} />
+    </>
+  )
+}
+
+const BELOW = 0 // IChainlinkResolver.Comparison: Below = 0, Above = 1
+
+// Settles on the Chainlink round live at close. The bot normally does it within one poll; the button is the fallback.
+function ChainlinkResolution({ market }: { market: Market }) {
+  const tx = useTransaction()
+  const resolver = { address: CHAINLINK_RESOLVER, abi: chainlinkResolverAbi } as const
+  const marketAddress = market.address as Address
+  const { data: feedConfig } = useReadContract({ ...resolver, functionName: 'configOf', args: [marketAddress] })
+  const feed = feedConfig?.feed ?? zeroAddress
+  const { data: feedInfo } = useReadContracts({
+    allowFailure: false,
+    contracts: [
+      { address: feed, abi: aggregatorAbi, functionName: 'decimals' },
+      { address: feed, abi: aggregatorAbi, functionName: 'description' },
+    ],
+    query: { enabled: feed !== zeroAddress },
+  })
+
+  if (!feedConfig) return <p className="text-sm text-muted">Loading feed…</p>
+  if (feed === zeroAddress)
+    return <p className="text-sm text-muted">No price feed configured: unless the admin configures it before close, the market cancels.</p>
+  if (!feedInfo) return <p className="text-sm text-muted">Loading feed…</p>
+
+  const [decimals, description] = feedInfo
+  const price = (raw: bigint) => Number(formatUnits(raw, decimals)).toLocaleString('en-US', { maximumFractionDigits: 2 })
+  const closeTime = BigInt(Math.floor(new Date(market.closesAt).getTime() / 1000))
+  // The round search runs inside confirm, so the button shows pending from the first click.
+  const resolve = () =>
+    tx.run(() =>
+      tx.confirm(
+        'Resolving…',
+        roundAtClose(feed, closeTime).then((roundId) => tx.write({ ...resolver, functionName: 'resolve', args: [marketAddress, roundId] })),
+      ),
+    )
+
+  return (
+    <>
+      <p className="text-sm text-muted">
+        YES if Chainlink {description} is {feedConfig.comparison === BELOW ? 'below' : 'above'} {price(feedConfig.threshold)} at close;
+        exactly equal resolves NO.
+      </p>
+      {market.priceResolution && (
+        <p className="text-sm">
+          Settled at {price(market.priceResolution.price)} (round {market.priceResolution.roundId.toString()}).
+        </p>
+      )}
+      {market.status === 'closed' && (
+        <>
+          <p className="text-sm text-muted">Anyone can settle it now; the bot usually does within minutes.</p>
+          <ActionButton label="Resolve from Chainlink" onClick={resolve} pending={tx.pending} />
+        </>
       )}
       <TxError error={tx.error} />
     </>
