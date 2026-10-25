@@ -11,7 +11,7 @@ export type Market = {
   question: string
   category?: Category // unset when the on-chain spec is malformed
   closesAt: string // ISO timestamp
-  status: 'open' | 'closed' | 'resolved'
+  status: 'open' | 'closed' | 'resolved' | 'cancelled'
   resolvedOutcome?: Outcome
   // CPMM pool reserves of outcome shares. YES price = noReserve / (yesReserve + noReserve).
   yesReserve: number
@@ -36,6 +36,8 @@ export type Trade = {
 }
 
 export const FEE = 0.01 // Market.FEE_BPS = 100
+// Unresolved by the deadline: every share redeems at half, YES and NO alike (Market._settlementValue).
+export const CANCELLED_PAYOUT = 0.5
 
 export const priceYes = (m: Market) => m.noReserve / (m.yesReserve + m.noReserve)
 export const priceOf = (m: Market, o: Outcome) => (o === 'YES' ? priceYes(m) : 1 - priceYes(m))
@@ -44,9 +46,10 @@ export const DAY_SECS = 86_400
 export const priceAt = (m: Market, at: number) => (m.history.findLast((pt) => pt.at <= at) ?? m.history[0]).price
 export const changeSince = (m: Market, secs: number) => priceYes(m) - priceAt(m, Date.now() / 1000 - secs)
 
-// Value of a position now: resolved markets pay 1 per winning share, 0 per losing share.
+// Value of a position now: resolved markets pay 1 per winning share, 0 per losing share; cancelled pay half.
 export function positionValue(p: Position, m: Market) {
   if (m.status === 'resolved') return m.resolvedOutcome === p.outcome ? p.shares : 0
+  if (m.status === 'cancelled') return p.shares * CANCELLED_PAYOUT
   return p.shares * priceOf(m, p.outcome)
 }
 

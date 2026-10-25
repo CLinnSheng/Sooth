@@ -1,13 +1,13 @@
 import { parseAbi, type Address } from 'viem'
 
 // Base Sepolia deployment, from contracts/broadcast/DeployMarketFactory.s.sol/84532/run-latest.json.
-export const FACTORY: Address = '0x4ed36D2736bE22816bb78ba475C10f01Fa3E4Db6'
+export const FACTORY: Address = '0x8d399B14ea106bA62F79186217DB6fF1F75dc492'
 // Sooth's MockUSDC (mUSDC, 6 decimals), the collateral for every market.
 export const USDC: Address = '0x5f29331BBBA6f605942f5de0B217359F3C7B7c51'
 // Factory deploy block: log scans start here, nothing older can belong to Sooth.
-export const DEPLOY_BLOCK = 49_630_367n
+export const DEPLOY_BLOCK = 50_040_022n
 // Deployed by the factory constructor: one ERC-1155 holds every market's YES/NO shares.
-export const OUTCOME_TOKEN: Address = '0x7Cf006898087aEB8578137173fF53aA8Fe8996E8'
+export const OUTCOME_TOKEN: Address = '0xA2D1e9A1e195d01B1aC21090962B7F2AD76BDB5B'
 
 export const factoryAbi = parseAbi([
   'function marketCount() view returns (uint256)',
@@ -31,6 +31,7 @@ export const marketAbi = parseAbi([
   'function noPool() view returns (uint256)',
   'function closeTime() view returns (uint64)',
   'function state() view returns (uint8)',
+  'function winningOutcome() view returns (uint8)',
   'function quoteBuy(uint8 outcome, uint256 collateralIn) view returns (uint256 sharesOut, uint256 fee)',
   'function quoteSell(uint8 outcome, uint256 sharesIn) view returns (uint256 collateralOut, uint256 fee)',
   'function buy(uint8 outcome, uint256 collateralIn, uint256 minSharesOut, uint256 deadline) returns (uint256 sharesOut)',

@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  Ban,
   Check,
   CloudSun,
   Coins,
@@ -22,6 +23,7 @@ import { baseSepolia } from 'wagmi/chains'
 import { useIsAdmin } from './chain'
 import { OUTCOME_TOKEN, USDC, marketAbi, outcomeTokenAbi } from './contracts'
 import {
+  CANCELLED_PAYOUT,
   FEE,
   basescanTx,
   cents,
@@ -166,6 +168,12 @@ export function StatusBadge({ market }: { market: Market }) {
         <span className="size-1.5 rounded-full bg-muted" /> Trading closed
       </span>
     )
+  if (market.status === 'cancelled')
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-raised px-2.5 py-0.5 text-xs font-medium text-muted">
+        <Ban size={12} /> Cancelled
+      </span>
+    )
   if (market.status === 'resolved')
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-black">
@@ -288,7 +296,14 @@ export function MarketCard({ market, onPick }: { market: Market; onPick: (o: Out
           {market.question}
         </Link>
       </h3>
-      {market.status === 'resolved' ? (
+      {market.status === 'cancelled' ? (
+        <div className="mt-auto flex flex-col gap-1">
+          <span className="text-3xl font-extrabold tracking-tight text-muted">Cancelled</span>
+          <span className="text-xs text-muted">
+            Not resolved in time · every share redeems for {usdc(CANCELLED_PAYOUT)} USDC
+          </span>
+        </div>
+      ) : market.status === 'resolved' ? (
         <div className="mt-auto flex flex-col gap-1">
           <span className="flex items-center gap-2 text-3xl font-extrabold tracking-tight">
             <Check size={26} strokeWidth={3} className={market.resolvedOutcome === 'YES' ? 'text-yes' : 'text-no'} />

@@ -129,7 +129,13 @@ export default function Portfolio() {
                   <td className="p-4 text-right">{usdc(p.shares)}</td>
                   <td className="p-4 text-right">{cents(p.avgPrice)}</td>
                   <td className="p-4 text-right">
-                    {m.status === 'resolved' ? <span className="text-xs text-muted">Resolved {m.resolvedOutcome}</span> : cents(priceOf(m, p.outcome))}
+                    {m.status === 'resolved' ? (
+                      <span className="text-xs text-muted">Resolved {m.resolvedOutcome}</span>
+                    ) : m.status === 'cancelled' ? (
+                      <span className="text-xs text-muted">Cancelled</span>
+                    ) : (
+                      cents(priceOf(m, p.outcome))
+                    )}
                   </td>
                   <td className="p-4 text-right">{usdc(value)}</td>
                   <td className="p-4 text-right">

@@ -23,6 +23,9 @@ const client = getPublicClient(config, { chainId: baseSepolia.id })
 const MAX_LOG_RANGE = 50_000n
 const REFETCH_MS = 30_000
 const STATE_OPEN = 0
+// Mirrors IMarket.State. Proposed (2) is never set by Market; Closed and Proposed both show as closed.
+const STATE_RESOLVED = 3
+const STATE_CANCELLED = 4
 const OUTCOME_YES = 0
 const OUTCOME_NO = 1
 const OUTCOMES: Outcome[] = ['YES', 'NO']
@@ -131,13 +134,14 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
 
 async function readMarket(address: Address, blockNumber: bigint) {
   const call = { address, abi: marketAbi, blockNumber } as const
-  const [yesPool, noPool, closeTime, state] = await Promise.all([
+  const [yesPool, noPool, closeTime, state, winningOutcome] = await Promise.all([
     client.readContract({ ...call, functionName: 'yesPool' }),
     client.readContract({ ...call, functionName: 'noPool' }),
     client.readContract({ ...call, functionName: 'closeTime' }),
     client.readContract({ ...call, functionName: 'state' }),
+    client.readContract({ ...call, functionName: 'winningOutcome' }),
   ])
-  return { address, yesPool, noPool, closeTime, state }
+  return { address, yesPool, noPool, closeTime, state, winningOutcome }
 }
 
 // Scans only blocks not seen before. A market created after the last scan has no earlier trades,
@@ -201,8 +205,9 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
     rules: spec?.rules ?? INVALID_SPEC_RULES,
     source: spec?.source,
     closesAt: new Date(Number(state.closeTime) * 1000).toISOString(),
-    // The contract has no resolution yet, so every state past Open shows as closed.
-    status: state.state === STATE_OPEN ? 'open' : 'closed',
+    status: toStatus(state.state),
+    // winningOutcome reads as Yes (0) until resolution, so it only counts once Resolved.
+    resolvedOutcome: state.state === STATE_RESOLVED ? OUTCOMES[state.winningOutcome] : undefined,
     yesReserve,
     noReserve,
     volume: toUnits(volume),
@@ -213,6 +218,13 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
       { at: Date.now() / 1000, price: noReserve / (yesReserve + noReserve) },
     ],
   }
+}
+
+function toStatus(state: number): Market['status'] {
+  if (state === STATE_OPEN) return 'open'
+  if (state === STATE_RESOLVED) return 'resolved'
+  if (state === STATE_CANCELLED) return 'cancelled'
+  return 'closed'
 }
 
 // Mirrors the pool updates in Market.buy/sell, so each trade's resulting price comes from its log alone.
