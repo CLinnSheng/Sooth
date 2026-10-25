@@ -5,9 +5,9 @@ import { erc20Abi, formatUnits, isAddress, zeroAddress } from 'viem'
 import { useWallet } from '../wallet'
 import { useAccount, useReadContract } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
-import { PAGE_SIZE, ShowMore } from '../components'
+import { ClaimButton, PAGE_SIZE, ShowMore } from '../components'
 import { USDC } from '../contracts'
-import { ago, basescanAddr, basescanTx, cents, positionValue, priceOf, shortAddr, signed, usdc } from '../mock'
+import { ago, basescanAddr, basescanTx, cents, isSettled, positionValue, priceOf, shortAddr, signed, usdc } from '../mock'
 
 // /portfolio is the connected wallet; /portfolio/:address is anyone's, read-only from public chain data.
 export default function Portfolio() {
@@ -59,6 +59,8 @@ export default function Portfolio() {
   const total = rows.reduce((s, r) => s + r.value, 0)
   const pnl = rows.reduce((s, r) => s + r.pnl, 0)
   const cost = rows.reduce((s, r) => s + r.p.shares * r.p.avgPrice, 0)
+  // redeem() pays both sides at once, so each row's button shows its market's total.
+  const payout = (marketId: number) => rows.filter((r) => r.m.id === marketId).reduce((s, r) => s + r.value, 0)
   const history = data.trades.filter((t) => t.trader.toLowerCase() === owner.toLowerCase()).toReversed()
   const cash = isOwn ? wallet?.usdc : viewedCash === undefined ? null : Number(formatUnits(viewedCash, 6))
 
@@ -139,10 +141,8 @@ export default function Portfolio() {
                   </td>
                   <td className="p-4 text-right">{usdc(value)}</td>
                   <td className="p-4 text-right">
-                    {m.status === 'resolved' && value > 0 ? (
-                      <button className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-black hover:bg-zinc-200 active:scale-[0.98]">
-                        Redeem {usdc(value)}
-                      </button>
+                    {isOwn && isSettled(m) && value > 0 ? (
+                      <ClaimButton market={m} claim="redeem" payout={payout(m.id)} />
                     ) : (
                       <span className={pnl >= 0 ? 'text-yes' : 'text-no'}>{signed(pnl)}</span>
                     )}

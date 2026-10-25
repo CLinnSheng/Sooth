@@ -134,14 +134,15 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[] }> {
 
 async function readMarket(address: Address, blockNumber: bigint) {
   const call = { address, abi: marketAbi, blockNumber } as const
-  const [yesPool, noPool, closeTime, state, winningOutcome] = await Promise.all([
+  const [yesPool, noPool, closeTime, state, winningOutcome, liquidityWithdrawn] = await Promise.all([
     client.readContract({ ...call, functionName: 'yesPool' }),
     client.readContract({ ...call, functionName: 'noPool' }),
     client.readContract({ ...call, functionName: 'closeTime' }),
     client.readContract({ ...call, functionName: 'state' }),
     client.readContract({ ...call, functionName: 'winningOutcome' }),
+    client.readContract({ ...call, functionName: 'liquidityWithdrawn' }),
   ])
-  return { address, yesPool, noPool, closeTime, state, winningOutcome }
+  return { address, yesPool, noPool, closeTime, state, winningOutcome, liquidityWithdrawn }
 }
 
 // Scans only blocks not seen before. A market created after the last scan has no earlier trades,
@@ -200,6 +201,7 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
   return {
     id,
     address: state.address,
+    creator: created.args.creator,
     question: spec?.question ?? `Market #${id}`,
     category: spec?.category,
     rules: spec?.rules ?? INVALID_SPEC_RULES,
@@ -208,6 +210,7 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Tra
     status: toStatus(state.state),
     // winningOutcome reads as Yes (0) until resolution, so it only counts once Resolved.
     resolvedOutcome: state.state === STATE_RESOLVED ? OUTCOMES[state.winningOutcome] : undefined,
+    liquidityWithdrawn: state.liquidityWithdrawn,
     yesReserve,
     noReserve,
     volume: toUnits(volume),

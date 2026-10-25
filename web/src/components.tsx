@@ -41,6 +41,7 @@ import {
   type Outcome,
   type PricePoint,
 } from './mock'
+import { useTransaction } from './tx'
 import { useWallet } from './wallet'
 import { config } from './wagmi'
 
@@ -345,6 +346,31 @@ export function ShowMore({ shown, total, onClick }: { shown: number; total: numb
     <button onClick={onClick} className={`w-full rounded-xl py-2 text-sm font-medium text-muted hover:bg-raised hover:text-white ${focus}`}>
       Show {Math.min(PAGE_SIZE, total - shown)} more of {total - shown}
     </button>
+  )
+}
+
+// Settled-market payouts: redeem pays every share the wallet holds (YES and NO together),
+// withdrawLiquidity pays the creator the pool's shares.
+const claims = {
+  redeem: { label: 'Redeem', pending: 'Redeeming…' },
+  withdrawLiquidity: { label: 'Withdraw', pending: 'Withdrawing…' },
+} as const
+
+export function ClaimButton({ market, claim, payout }: { market: Market; claim: keyof typeof claims; payout: number }) {
+  const tx = useTransaction()
+  const send = () =>
+    tx.run(() => tx.confirm(claims[claim].pending, tx.write({ address: market.address as Address, abi: marketAbi, functionName: claim })))
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <button
+        onClick={send}
+        disabled={tx.pending !== null}
+        className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-black hover:bg-zinc-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
+      >
+        {tx.pending ? <><LoaderCircle size={12} className="animate-spin" /> {tx.pending}</> : `${claims[claim].label} ${usdc(payout)}`}
+      </button>
+      {tx.error && <span role="alert" className="text-xs text-no">{tx.error}</span>}
+    </span>
   )
 }
 

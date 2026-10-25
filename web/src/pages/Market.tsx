@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
-import { Change, PAGE_SIZE, PriceChart, ProbabilityBar, ShowMore, StatusBadge, TradePanel } from '../components'
+import { Change, ClaimButton, PAGE_SIZE, PriceChart, ProbabilityBar, ShowMore, StatusBadge, TradePanel } from '../components'
 import {
   ago,
   basescanAddr,
@@ -14,7 +14,9 @@ import {
   compact,
   date,
   dateTime,
+  isSettled,
   pct,
+  poolPayout,
   positionValue,
   priceOf,
   priceYes,
@@ -48,6 +50,9 @@ export default function Market() {
 
   const p = priceYes(market)
   const mine = positions.filter((pos) => pos.marketId === market.id)
+  const payout = mine.reduce((sum, pos) => sum + positionValue(pos, market), 0)
+  const canWithdrawLiquidity =
+    isSettled(market) && !market.liquidityWithdrawn && address?.toLowerCase() === market.creator.toLowerCase()
   const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
   // The last history point is stamped when markets load, so the page and chart share one clock.
@@ -131,6 +136,19 @@ export default function Market() {
                 </div>
               )
             })}
+            {isSettled(market) && payout > 0 && (
+              <div className="flex justify-end"><ClaimButton market={market} claim="redeem" payout={payout} /></div>
+            )}
+          </div>
+        )}
+
+        {canWithdrawLiquidity && (
+          <div className="flex items-center justify-between gap-4 rounded-3xl bg-surface p-5">
+            <div>
+              <h2 className="font-semibold">Your liquidity</h2>
+              <p className="text-sm text-muted">You seeded this market's pool; its shares pay out like any position.</p>
+            </div>
+            <ClaimButton market={market} claim="withdrawLiquidity" payout={poolPayout(market)} />
           </div>
         )}
 
