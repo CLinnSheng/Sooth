@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { Change, ClaimButton, PAGE_SIZE, PriceChart, ProbabilityBar, ShowMore, StatusBadge, TradePanel } from '../components'
+import { ResolutionPanel } from '../resolution'
 import {
   ago,
   basescanAddr,
@@ -151,6 +152,8 @@ export default function Market() {
             <ClaimButton market={market} claim="withdrawLiquidity" payout={poolPayout(market)} />
           </div>
         )}
+
+        <ResolutionPanel market={market} now={now} />
 
         <details open className="group rounded-3xl bg-surface p-5">
           <summary className="flex cursor-pointer list-none items-center justify-between font-semibold">
