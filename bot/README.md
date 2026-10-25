@@ -34,7 +34,7 @@ cd contracts && forge build          # the bot loads ABIs from contracts/out
 cd ../bot && cp .env.example .env    # fill in addresses and the bot key
 uv sync
 uv run playwright install chromium   # once, ~150MB
-uv run --env-file .env python -m sooth_bot
+uv run python -m sooth_bot          # reads .env
 ```
 
 Use a **dedicated wallet** with only gas (and later bond money). Never the admin or judge key: the judge must

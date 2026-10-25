@@ -65,21 +65,29 @@ class OptimisticSettler:
         if status == RequestStatus.NONE:
             if state == MarketState.CLOSED:
                 self._propose(info, now)
+            else:
+                logger.debug("optimistic: %s not closed yet (state %s)", info.address, MarketState(state).name)
         elif state == MarketState.CANCELLED:
             logger.info("optimistic: refunding bonds on cancelled %s", info.address)
             self._chain.send(self._resolver.functions.refund(info.address))
         elif status == RequestStatus.PROPOSED and now >= proposed_at + self._challenge_window:
             logger.info("optimistic: finalizing %s", info.address)
             self._chain.send(self._resolver.functions.finalize(info.address))
+        elif status == RequestStatus.PROPOSED:
+            logger.debug("optimistic: %s in challenge window until %d", info.address, proposed_at + self._challenge_window)
         elif status == RequestStatus.DISPUTED and info.address not in self._alerted:
             self._alert_dispute(info, disputer)
+        else:
+            logger.debug("optimistic: %s disputed, awaiting the judge", info.address)
 
     def _propose(self, info: MarketInfo, now: int) -> None:
         next_attempt = self._next_attempt.get(info.address)
         if next_attempt is not None and now < next_attempt:
+            logger.debug("optimistic: %s backing off until %d", info.address, next_attempt)
             return
         deadline = self._chain.market(info.address).functions.resolutionDeadline().call()
         if now + self._challenge_window >= deadline:
+            logger.debug("optimistic: %s too close to its deadline to propose", info.address)
             return  # the resolver would reject it as too late; don't spend tokens finding out
         # Set before asking, so a crash mid-run can't cause a retry on every poll.
         self._next_attempt[info.address] = now + self._retry_seconds

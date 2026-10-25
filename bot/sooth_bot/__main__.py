@@ -1,9 +1,11 @@
-"""Entry point. From bot/: `uv run --env-file .env python -m sooth_bot`."""
+"""Entry point. From bot/: `uv run python -m sooth_bot` (reads .env)."""
 
 import logging
+import os
 import time
 
 import httpx
+from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 from web3.exceptions import Web3Exception
 
@@ -17,7 +19,9 @@ logger = logging.getLogger("sooth_bot")
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Real environment variables win over .env, so a deploy can override any value.
+    load_dotenv()
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = Config.from_env()
     chain = Chain(config)
     # httpx for LLM calls (Go asks callers to identify with their own user agent); one Chromium for every
