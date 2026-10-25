@@ -106,7 +106,7 @@ One YES slip and one NO slip together are worth exactly 1 USDC, because one of t
 
 ### What is not built yet
 
-Markets support constant-product YES/NO trading with 1% fees accrued for the platform wallet recorded as creator. After trading closes, anyone can call `withdrawFees()` to pay the creator. Resolution, redemption, and liquidity withdrawal are not implemented yet. Use test collateral until the full lifecycle exists.
+Markets support constant-product YES/NO trading with 1% fees for the creator (`docs/trading-engine.md`) and phase 1 resolution: the arbitrator resolves, holders redeem, and the creator claims the pool back (`docs/resolution.md`). Bonds, a challenge window and disputes (E3 phase 2) are not built yet, and the website doesn't call the contracts yet.
 
 ---
 
@@ -286,7 +286,7 @@ function mint(address to, uint256 id, uint256 amount) external onlyMarketOf(id) 
 - A **modifier** is a reusable check that runs before the function body. `_;` means "now run the function".
 - This is the key security rule of the token: **Market #1 can only mint Market #1's tokens.** Even if Market #1 had a bug, it couldn't create tokens for Market #2. A test checks exactly this (`test_RevertWhen_MarketMintsAnotherMarketsToken`).
 - `mintBatch` does the same check for every ID in the list, then mints them all in one call. Market creation uses it to mint YES and NO together, which is cheaper than two separate `mint` calls.
-- `burn` isn't used yet. It's for redeeming tokens after resolution (E3-2), and it's in the interface now so the signature doesn't change later.
+- `burnBatch` (added with trading) does the same for burning. `sell`, `redeem` and `claimLiquidity` use it.
 
 ### 3.5 `Market.sol`: one prediction market
 
@@ -406,11 +406,10 @@ contract MarketFactory is AccessControl, ReentrancyGuard, IMarketFactory {
 address public immutable implementation;      // the Market "master copy"
 IOutcomeToken public immutable outcomeToken;
 IERC20  public immutable collateral;          // the one token used as money (USDC)
-uint256 public immutable minLiquidity;        // Q7 limit, fixed at deploy
+uint256 public constant MIN_LIQUIDITY = 10e6; // Q7 limit: 10 USDC
 
 uint256 public marketCount;                   // also the last market ID
 mapping(uint256 => address) public markets;   // id → market address
-mapping(address => bool) public isMarket;     // is this address one of our markets?
 ```
 
 #### Constructor
@@ -428,10 +427,9 @@ constructor(address admin, address collateral_) {
 ```
 
 - `new OutcomeToken(address(this))` deploys the shared token and tells it "I am your factory". `new Market(address(this), token)` deploys the implementation with its factory and outcome-token addresses. Deploying them here means only one deploy step and no risk of wiring the wrong addresses together.
-- Zero minimums are rejected, because a market that closes instantly or has an empty pool makes no sense. This also lets `_validate` use simpler checks.
 - The collateral token is fixed forever. Only USDC is supported, so there is no whitelist to manage; supporting another token means deploying a new factory.
 - `DEFAULT_ADMIN_ROLE` can create markets and grant or revoke the role for other admins.
-- The limits are constructor parameters (Q7), so the deploy script can use 10 minutes for a demo and longer values elsewhere.
+- The limits are constants (Q7, PR #18): `MIN_LIQUIDITY` here, `FEE_BPS` and `RESOLUTION_WINDOW` in `Market`. Changing them means redeploying.
 
 #### `createMarket`
 
@@ -444,7 +442,6 @@ function createMarket(CreateParams calldata p)
     marketId = ++marketCount;
     market = Clones.clone(implementation);
     markets[marketId] = market;
-    isMarket[market] = true;
     outcomeToken.registerMarket(marketId, market);
     collateral.safeTransferFrom(msg.sender, market, p.initialLiquidity);
     IMarket(market).initialize(IMarket.InitParams({ ... creator: msg.sender, ... }));
