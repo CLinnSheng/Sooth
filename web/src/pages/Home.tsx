@@ -1,7 +1,7 @@
 import { Search, SearchX } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useDashboardMarkets, useMarkets } from '../chain'
+import { useDashboardMarkets, useMarketList, useMarkets } from '../chain'
 import { MarketCard } from '../components'
 import { categories, type Category, type Market, type Outcome } from '../mock'
 
@@ -13,23 +13,26 @@ const sorts = {
 
 export default function Home() {
   const navigate = useNavigate()
-  // Dashboard first: prices + volume from the small dashboard scan. The full
-  // load (history, resolution, payouts, past trades, positions) only starts
-  // once the summary is in, so it can no longer block or error the dashboard,
-  // and it does not fire a second full log scan in parallel with the first.
-  const summary = useDashboardMarkets()
+  // Three stages, each starting only after the previous one, so no stage
+  // blocks the dashboard and no two log scans fire in parallel:
+  // 1. Contract reads only: price, status, close time. No log scan, so the
+  //    dashboard appears on entry even if the scan is slow or throttled.
+  // 2. Dashboard scan: question, category and volume fill in.
+  // 3. Full load: history, resolution, payouts, past trades, positions.
+  const marketList = useMarketList()
+  const summary = useDashboardMarkets(Boolean(marketList.data))
   const full = useMarkets(Boolean(summary.data))
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<'All' | Category>('All')
   const [sort, setSort] = useState<keyof typeof sorts>('Volume')
 
-  const data = full.data ?? summary.data
-  if (!data) return <p className="text-muted">{summary.error ? 'Could not load markets from Base Sepolia.' : 'Loading markets…'}</p>
+  const markets = full.data?.markets ?? summary.data?.markets ?? marketList.data?.markets
+  if (!markets) return <p className="text-muted">{marketList.error ? 'Could not load markets from Base Sepolia.' : 'Loading markets…'}</p>
 
-  const { markets } = data
-  // Full data replaces the summary when it lands; until then the summary
-  // markets are already complete for price and volume.
+  // Full data replaces the summary when it lands; the summary replaces the
+  // contract-read list when its scan lands.
   const detailsPending = Boolean(summary.data && !full.data)
+  const summaryPending = Boolean(marketList.data && !summary.data)
   const logScanFailed = summary.data?.logScanFailed && !full.data
   const pick = (id: number) => (o: Outcome) => navigate(`/market/${id}?outcome=${o}`)
 
@@ -77,11 +80,13 @@ export default function Home() {
           </div>
         </div>
 
-        {detailsPending && (
+        {(summaryPending || detailsPending) && (
           <p className="text-xs text-muted">
-            {logScanFailed
-              ? 'Prices are live; volume and questions are still loading and will fill in on the next refresh.'
-              : 'Prices and volume are live; full details, past trades and positions are still loading.'}
+            {summaryPending
+              ? 'Prices are live; questions and volume are still loading.'
+              : logScanFailed
+                ? 'Prices are live; volume and questions are still loading and will fill in on the next refresh.'
+                : 'Prices and volume are live; full details, past trades and positions are still loading.'}
           </p>
         )}
 
