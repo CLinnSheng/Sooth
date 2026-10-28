@@ -41,7 +41,7 @@ import { config } from './wagmi'
 
 const client = getPublicClient(config, { chainId: baseSepolia.id })
 
-// publicnode caps eth_getLogs at 50k blocks, about 1.2 days of Base blocks.
+// Tenderly takes far larger ranges, but 50k-block chunks (about 1.2 days of Base blocks) keep each response small.
 const MAX_LOG_RANGE = 50_000n
 const REFETCH_MS = 30_000
 const STATE_OPEN = 0
