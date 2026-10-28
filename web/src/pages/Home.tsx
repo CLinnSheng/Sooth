@@ -1,7 +1,7 @@
 import { Search, SearchX } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useMarkets } from '../chain'
+import { useDashboardMarkets, useMarkets } from '../chain'
 import { MarketCard } from '../components'
 import { categories, type Category, type Market, type Outcome } from '../mock'
 
@@ -13,14 +13,24 @@ const sorts = {
 
 export default function Home() {
   const navigate = useNavigate()
-  const { data, error } = useMarkets()
+  // Dashboard first: prices + volume from the small dashboard scan. The full
+  // load (history, resolution, payouts, past trades, positions) only starts
+  // once the summary is in, so it can no longer block or error the dashboard,
+  // and it does not fire a second full log scan in parallel with the first.
+  const summary = useDashboardMarkets()
+  const full = useMarkets(Boolean(summary.data))
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<'All' | Category>('All')
   const [sort, setSort] = useState<keyof typeof sorts>('Volume')
 
-  if (!data) return <p className="text-muted">{error ? 'Could not load markets from Base Sepolia.' : 'Loading markets…'}</p>
+  const data = full.data ?? summary.data
+  if (!data) return <p className="text-muted">{summary.error ? 'Could not load markets from Base Sepolia.' : 'Loading markets…'}</p>
 
   const { markets } = data
+  // Full data replaces the summary when it lands; until then the summary
+  // markets are already complete for price and volume.
+  const detailsPending = Boolean(summary.data && !full.data)
+  const logScanFailed = summary.data?.logScanFailed && !full.data
   const pick = (id: number) => (o: Outcome) => navigate(`/market/${id}?outcome=${o}`)
 
   const list = markets
@@ -66,6 +76,14 @@ export default function Home() {
             ))}
           </div>
         </div>
+
+        {detailsPending && (
+          <p className="text-xs text-muted">
+            {logScanFailed
+              ? 'Prices are live; volume and questions are still loading and will fill in on the next refresh.'
+              : 'Prices and volume are live; full details, past trades and positions are still loading.'}
+          </p>
+        )}
 
         {list.length ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
