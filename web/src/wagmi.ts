@@ -35,7 +35,19 @@ export const config = getDefaultConfig({
   transports: {
     // sepolia.base.org caps eth_getLogs at 200 blocks; publicnode allows 50k. batch packs the
     // per-market reads into one HTTP request. Falls back to the default RPC for plain reads.
-    [baseSepolia.id]: fallback([http('https://base-sepolia-rpc.publicnode.com', { batch: true }), http()]),
+    // Fail fast, don't retry for minutes: with the defaults, a hanging
+    // publicnode request could be retried across both transports and then
+    // again by React Query, turning one hiccup into minutes of
+    // "Loading markets…". A 10s timeout with no per-transport retry means
+    // the fallback is tried once, quickly, and a genuinely dead RPC shows
+    // an error (and a 30s refetch retries it) instead of hanging.
+    [baseSepolia.id]: fallback(
+      [
+        http('https://base-sepolia-rpc.publicnode.com', { batch: true, timeout: 10_000, retryCount: 0 }),
+        http('https://sepolia.base.org', { timeout: 10_000, retryCount: 0 }),
+      ],
+      { retryCount: 0, retryDelay: 500 },
+    ),
   },
   wallets,
 })
