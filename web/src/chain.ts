@@ -43,6 +43,15 @@ const client = getPublicClient(config, { chainId: baseSepolia.id })
 
 // publicnode caps eth_getLogs at 50k blocks, about 1.2 days of Base blocks.
 const MAX_LOG_RANGE = 50_000n
+// A failing 50k range is retried, then split in half, down to this size. Splitting
+// further would only help an RPC that caps ranges far below 50k, at the cost of
+// thousands of requests, so a range this small failing is treated as a real outage.
+const MIN_LOG_RANGE = 10_000n
+// The old scan fired every 50k chunk at once; a burst like that is what gets
+// throttled. Dashboard and full scans now run at most this many chunks in parallel.
+const LOG_CONCURRENCY = 3
+const BLOCK_TIME_CONCURRENCY = 20
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const REFETCH_MS = 30_000
 const STATE_OPEN = 0
 // Mirrors IMarket.State. Proposed (2) is never set by Market; Closed and Proposed both show as closed.
@@ -57,10 +66,18 @@ const OPENING_PRICE = 0.5
 const RESOLUTION_WINDOW_SECS = 7 * DAY_SECS
 const INVALID_SPEC_RULES = 'This market was created with a spec that is not in the expected format.'
 
-const soothEvents = [
+// Everything the dashboard card needs from logs: the spec (question/category)
+// and the trades that make up volume. Prices come from the pool reads, not logs,
+// and block timestamps are not needed for volume at all.
+const dashboardEvents = [
   getAbiItem({ abi: factoryAbi, name: 'MarketCreated' }),
   getAbiItem({ abi: marketAbi, name: 'Bought' }),
   getAbiItem({ abi: marketAbi, name: 'Sold' }),
+]
+// Everything else the market, portfolio and collect pages need: resolution,
+// payouts, redemptions and past trades with timestamps. This is loaded after
+// the dashboard is already visible, never before it.
+const otherEvents = [
   getAbiItem({ abi: marketAbi, name: 'FeesWithdrawn' }),
   getAbiItem({ abi: marketAbi, name: 'LiquidityWithdrawn' }),
   getAbiItem({ abi: marketAbi, name: 'Redeemed' }),
@@ -71,6 +88,7 @@ const soothEvents = [
   getAbiItem({ abi: optimisticResolverAbi, name: 'Refunded' }),
   getAbiItem({ abi: chainlinkResolverAbi, name: 'PriceResolved' }),
 ]
+const soothEvents = [...dashboardEvents, ...otherEvents]
 
 type Spec = Pick<Market, 'question' | 'category' | 'rules' | 'source'>
 type MarketState = Awaited<ReturnType<typeof readMarket>>
@@ -87,13 +105,29 @@ type MarketLogs = { trades: TradeLog[]; request: ResolverLog[]; price?: PriceLog
 // Outcome shares use the collateral's 6 decimals.
 const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
 
-// shortcut: logs are scanned in the browser, one getLogs call per 50k blocks since deploy, and logs
-// from a reorg stay cached until reload. Move to an indexer (Ponder) once first load gets slow.
-const scan: { toBlock: bigint; logs: SoothLog[] } = { toBlock: DEPLOY_BLOCK - 1n, logs: [] }
+// Logs are scanned in the browser, one getLogs call per 50k blocks since deploy,
+// and logs from a reorg stay cached until reload. Move to an indexer (Ponder)
+// once first load gets slow. The two scans are kept separate on purpose: the
+// dashboard scan is small and must not wait for, or fail because of, the full
+// scan, and the full scan must not re-scan the dashboard range twice in one tick.
+type ScanCache = { toBlock: bigint; logs: SoothLog[] }
+const dashboardScan: ScanCache = { toBlock: DEPLOY_BLOCK - 1n, logs: [] }
+const fullScan: ScanCache = { toBlock: DEPLOY_BLOCK - 1n, logs: [] }
 const blockTimes = new Map<bigint, number>()
 
-export function useMarkets() {
-  return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS })
+// Full market data: prices, volume, history, resolution, payouts, past trades
+// and (via usePositions) user positions. Loaded in the background on the
+// dashboard, and directly on the market/portfolio/collect pages.
+export function useMarkets(enabled = true) {
+  return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS, enabled })
+}
+
+// Dashboard-first data: prices from pool reads, plus question/category/volume
+// from the small dashboard log scan. No block timestamps, no resolver/payout
+// logs, no positions. This is what Home renders, so a slow or failing full
+// scan can no longer turn the whole dashboard into "Could not load markets".
+export function useDashboardMarkets() {
+  return useQuery({ queryKey: ['markets', 'summary'], queryFn: loadMarketSummaries, refetchInterval: REFETCH_MS })
 }
 
 // DEFAULT_ADMIN_ROLE is bytes32(0) in OpenZeppelin AccessControl.
@@ -137,20 +171,90 @@ export function usePositions(owner: Address | undefined): Position[] {
   })
 }
 
-async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; redemptions: Redemption[] }> {
-  // Pin every read to one block, so state and logs describe the same moment.
-  const blockNumber = await client.getBlockNumber()
+async function loadMarketStates(blockNumber: bigint) {
   const count = await client.readContract({ address: FACTORY, abi: factoryAbi, functionName: 'marketCount', blockNumber })
   const addresses = await Promise.all(
     Array.from({ length: Number(count) }, (_, i) =>
       client.readContract({ address: FACTORY, abi: factoryAbi, functionName: 'markets', args: [BigInt(i + 1)], blockNumber }),
     ),
   )
-  const [states] = await Promise.all([
-    Promise.all(addresses.map((address) => readMarket(address, blockNumber))),
-    extendScan([FACTORY, OPTIMISTIC_RESOLVER, CHAINLINK_RESOLVER, ...addresses], blockNumber),
-  ])
-  await cacheBlockTimes(scan.logs)
+  const states = await Promise.all(addresses.map((address) => readMarket(address, blockNumber)))
+  return { addresses, states }
+}
+
+async function loadMarketSummaries(): Promise<{ markets: Market[]; logScanFailed: boolean }> {
+  // Pin every read to one block, so state and logs describe the same moment.
+  const blockNumber = await client.getBlockNumber()
+  const { addresses, states } = await loadMarketStates(blockNumber)
+  // If the log scan fails, still show the markets: prices come from the pool
+  // reads above, and the next refetch retries the scan (toBlock only advances
+  // on success, so a failed range is not skipped). Volume/question then fill
+  // in instead of the whole dashboard erroring out.
+  let logScanFailed = false
+  try {
+    await extendScan(dashboardScan, [FACTORY, ...addresses], dashboardEvents, blockNumber)
+  } catch (error) {
+    console.warn('Dashboard log scan failed; showing markets from contract reads only', error)
+    logScanFailed = true
+  }
+
+  const idByAddress = new Map(addresses.map((address, i) => [address.toLowerCase(), i + 1]))
+  const created = new Map<number, CreatedLog>()
+  const tradeLogs: TradeLog[] = []
+  for (const log of dashboardScan.logs) {
+    if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
+    else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
+  }
+  const markets = states.map((state, i) => {
+    const id = i + 1
+    const createdLog = created.get(id)
+    const emittedHere = (log: SoothLog) => idByAddress.get(log.address.toLowerCase()) === id
+    return toMarketSummary(id, state, createdLog, tradeLogs.filter(emittedHere))
+  })
+  return { markets, logScanFailed }
+}
+
+function toMarketSummary(id: number, state: MarketState, created: CreatedLog | undefined, trades: TradeLog[]): Market {
+  const yesReserve = toUnits(state.yesPool)
+  const noReserve = toUnits(state.noPool)
+  const volume = trades.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
+  const price = yesReserve + noReserve > 0 ? noReserve / (yesReserve + noReserve) : OPENING_PRICE
+  const spec = created ? parseSpec(created.args.spec) : null
+  return {
+    id,
+    address: state.address,
+    creator: created?.args.creator ?? zeroAddress,
+    arbitrator: created?.args.arbitrator ?? zeroAddress,
+    question: spec?.question ?? `Market #${id}`,
+    category: spec?.category,
+    rules: spec?.rules ?? INVALID_SPEC_RULES,
+    source: spec?.source,
+    closesAt: new Date(Number(state.closeTime) * 1000).toISOString(),
+    resolutionDeadline: Number(state.closeTime) + RESOLUTION_WINDOW_SECS,
+    status: toStatus(state.state),
+    // winningOutcome reads as Yes (0) until resolution, so it only counts once Resolved.
+    resolvedOutcome: state.state === STATE_RESOLVED ? OUTCOMES[state.winningOutcome] : undefined,
+    liquidityWithdrawn: state.liquidityWithdrawn,
+    // Filled in by the full load, after the dashboard is visible.
+    request: undefined,
+    priceResolution: undefined,
+    collected: { fees: 0, liquidity: 0 },
+    yesReserve,
+    noReserve,
+    volume: toUnits(volume),
+    // History (and the 30-day change derived from it) also comes from the
+    // full load. Until then a single current-price point makes changeSince 0
+    // instead of crashing on a missing history.
+    history: [{ at: Date.now() / 1000, price }],
+  }
+}
+
+async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; redemptions: Redemption[] }> {
+  // Pin every read to one block, so state and logs describe the same moment.
+  const blockNumber = await client.getBlockNumber()
+  const { addresses, states } = await loadMarketStates(blockNumber)
+  await extendScan(fullScan, [FACTORY, OPTIMISTIC_RESOLVER, CHAINLINK_RESOLVER, ...addresses], soothEvents, blockNumber)
+  await cacheBlockTimes(fullScan.logs)
 
   const idByAddress = new Map(addresses.map((address, i) => [address.toLowerCase(), i + 1]))
   const created = new Map<number, CreatedLog>()
@@ -159,7 +263,7 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
   const priceLogs: PriceLog[] = []
   const payoutLogs: PayoutLog[] = []
   const redeemLogs: RedeemLog[] = []
-  for (const log of scan.logs) {
+  for (const log of fullScan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
     else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
     else if (log.eventName === 'PriceResolved') priceLogs.push(log)
@@ -171,7 +275,10 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
   const markets = states.map((state, i) => {
     const id = i + 1
     const createdLog = created.get(id)
-    if (!createdLog) throw new Error(`MarketCreated log missing for market ${id}`)
+    // A missing MarketCreated log used to throw here and turn the whole
+    // dashboard into "Could not load markets". The market still exists on
+    // chain, so show it with a placeholder spec instead; its trades, pools
+    // and status are all read independently of that log.
     const emittedHere = (log: SoothLog) => idByAddress.get(log.address.toLowerCase()) === id
     // Resolver events name the market in an argument; the log's own address is the resolver.
     const aboutHere = (log: ResolverLog | PriceLog) => log.args.market.toLowerCase() === state.address.toLowerCase()
@@ -181,7 +288,7 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
       price: priceLogs.find(aboutHere),
       payouts: payoutLogs.filter(emittedHere),
     }
-    return toMarket(id, state, createdLog, logs, parseSpec(createdLog.args.spec))
+    return toMarket(id, state, createdLog, logs, createdLog ? parseSpec(createdLog.args.spec) : null)
   })
   const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
   const redemptions = redeemLogs.map((log) => ({
@@ -206,29 +313,80 @@ async function readMarket(address: Address, blockNumber: bigint) {
 }
 
 // Scans only blocks not seen before. A market created after the last scan has no earlier trades,
-// so scanning old ranges without its address loses nothing.
-async function extendScan(addresses: Address[], toBlock: bigint) {
-  if (toBlock <= scan.toBlock) return
-  const logs = await scanLogs(addresses, scan.toBlock + 1n, toBlock)
-  scan.logs.push(...logs)
-  scan.toBlock = toBlock
+// so scanning old ranges without its address loses nothing. toBlock only
+// advances on success, so a failed scan is retried on the next refetch
+// instead of silently skipping those blocks.
+async function extendScan(cache: ScanCache, addresses: Address[], events: typeof soothEvents, toBlock: bigint) {
+  if (toBlock <= cache.toBlock) return
+  const logs = await scanLogs(addresses, events, cache.toBlock + 1n, toBlock)
+  cache.logs.push(...logs)
+  cache.toBlock = toBlock
 }
 
-async function scanLogs(addresses: Address[], fromBlock: bigint, toBlock: bigint) {
-  const ranges = []
+async function scanLogs(addresses: Address[], events: typeof soothEvents, fromBlock: bigint, toBlock: bigint) {
+  const ranges: [bigint, bigint][] = []
   for (let start = fromBlock; start <= toBlock; start += MAX_LOG_RANGE) {
     const end = start + MAX_LOG_RANGE - 1n
-    ranges.push(
-      client.getLogs({ address: addresses, events: soothEvents, fromBlock: start, toBlock: end < toBlock ? end : toBlock, strict: true }),
-    )
+    ranges.push([start, end < toBlock ? end : toBlock])
   }
-  return (await Promise.all(ranges)).flat()
+  const results: SoothLog[][] = []
+  for (let i = 0; i < ranges.length; i += LOG_CONCURRENCY) {
+    const batch = ranges.slice(i, i + LOG_CONCURRENCY)
+    const logs = await Promise.all(batch.map(([start, end]) => fetchLogsRange(addresses, events, start, end)))
+    results.push(...logs)
+  }
+  return results.flat()
+}
+
+// One getLogs range, retried, then split in half on persistent failure. A
+// timeout or rate limit on a 50k range should not fail the whole dashboard
+// scan when a smaller range would succeed.
+async function fetchLogsRange(
+  addresses: Address[],
+  events: typeof soothEvents,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<SoothLog[]> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await client.getLogs({ address: addresses, events, fromBlock, toBlock, strict: true })
+    } catch (error) {
+      lastError = error
+      await sleep(500 * (attempt + 1))
+    }
+  }
+  if (toBlock - fromBlock + 1n > MIN_LOG_RANGE) {
+    const mid = (fromBlock + toBlock) / 2n
+    const first = await fetchLogsRange(addresses, events, fromBlock, mid)
+    const second = await fetchLogsRange(addresses, events, mid + 1n, toBlock)
+    return [...first, ...second]
+  }
+  throw lastError
 }
 
 async function cacheBlockTimes(logs: SoothLog[]) {
   const missing = [...new Set(logs.map((log) => log.blockNumber))].filter((b) => !blockTimes.has(b))
-  const blocks = await Promise.all(missing.map((blockNumber) => client.getBlock({ blockNumber })))
-  for (const block of blocks) blockTimes.set(block.number, Number(block.timestamp))
+  // The old code fired one getBlock per distinct log block all at once, the
+  // same burst pattern as the log scan. Fetch in bounded batches instead.
+  for (let i = 0; i < missing.length; i += BLOCK_TIME_CONCURRENCY) {
+    const batch = missing.slice(i, i + BLOCK_TIME_CONCURRENCY)
+    const blocks = await Promise.all(
+      batch.map(async (blockNumber) => {
+        let lastError: unknown
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            return await client.getBlock({ blockNumber })
+          } catch (error) {
+            lastError = error
+            await sleep(500 * (attempt + 1))
+          }
+        }
+        throw lastError
+      }),
+    )
+    for (const block of blocks) blockTimes.set(block.number, Number(block.timestamp))
+  }
 }
 
 // The factory hashes whatever text it is given, so the shape is still checked here before rendering.
@@ -253,18 +411,19 @@ export function parseSpec(json: string): Spec | null {
   return isValid ? { question, rules, category: category as Category, source: { label, url } } : null
 }
 
-function toMarket(id: number, state: MarketState, created: CreatedLog, logs: MarketLogs, spec: Spec | null): Market {
+function toMarket(id: number, state: MarketState, created: CreatedLog | undefined, logs: MarketLogs, spec: Spec | null): Market {
   const yesReserve = toUnits(state.yesPool)
   const noReserve = toUnits(state.noPool)
   const volume = logs.trades.reduce((sum, log) => sum + (log.eventName === 'Bought' ? log.args.collateralIn : log.args.collateralOut), 0n)
-  const prices = replayPrices(created.args.initialLiquidity, logs.trades)
+  const poolPrice = yesReserve + noReserve > 0 ? noReserve / (yesReserve + noReserve) : OPENING_PRICE
+  const prices = created ? replayPrices(created.args.initialLiquidity, logs.trades) : []
   const paid = (event: PayoutLog['eventName']) =>
     toUnits(logs.payouts.filter((log) => log.eventName === event).reduce((sum, log) => sum + log.args.amount, 0n))
   return {
     id,
     address: state.address,
-    creator: created.args.creator,
-    arbitrator: created.args.arbitrator,
+    creator: created?.args.creator ?? zeroAddress,
+    arbitrator: created?.args.arbitrator ?? zeroAddress,
     question: spec?.question ?? `Market #${id}`,
     category: spec?.category,
     rules: spec?.rules ?? INVALID_SPEC_RULES,
@@ -282,11 +441,15 @@ function toMarket(id: number, state: MarketState, created: CreatedLog, logs: Mar
     noReserve,
     volume: toUnits(volume),
     // Opens at 50/50 on creation, steps at every trade, and ends on the live pool price.
-    history: [
-      { at: blockTimes.get(created.blockNumber)!, price: OPENING_PRICE },
-      ...prices,
-      { at: Date.now() / 1000, price: noReserve / (yesReserve + noReserve) },
-    ],
+    // Without a MarketCreated log there is no creation block or opening
+    // price, so the history is just the live pool price.
+    history: created
+      ? [
+          { at: blockTimes.get(created.blockNumber)!, price: OPENING_PRICE },
+          ...prices,
+          { at: Date.now() / 1000, price: poolPrice },
+        ]
+      : [{ at: Date.now() / 1000, price: poolPrice }],
   }
 }
 
