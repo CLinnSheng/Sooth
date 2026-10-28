@@ -3,6 +3,7 @@ import {
   encodeAbiParameters,
   formatUnits,
   getAbiItem,
+  type GetLogsReturnType,
   hexToBigInt,
   keccak256,
   parseAbiParameters,
@@ -92,7 +93,11 @@ const soothEvents = [...dashboardEvents, ...otherEvents]
 
 type Spec = Pick<Market, 'question' | 'category' | 'rules' | 'source'>
 type MarketState = Awaited<ReturnType<typeof readMarket>>
-type SoothLog = Awaited<ReturnType<typeof scanLogs>>[number]
+// Derived directly from viem's getLogs return type, not from scanLogs:
+// deriving it from scanLogs made SoothLog circularly reference itself once
+// scanLogs/fetchLogsRange were annotated with SoothLog, which collapsed
+// every log arg to a broken type (bigint errors, any event names).
+type SoothLog = GetLogsReturnType<undefined, typeof soothEvents, true>[number]
 type CreatedLog = Extract<SoothLog, { eventName: 'MarketCreated' }>
 type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
 type PriceLog = Extract<SoothLog, { eventName: 'PriceResolved' }>
