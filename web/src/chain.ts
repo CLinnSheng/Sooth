@@ -41,8 +41,9 @@ import { config } from './wagmi'
 
 const client = getPublicClient(config, { chainId: baseSepolia.id })
 
-// Tenderly takes far larger ranges, but 50k-block chunks (about 1.2 days of Base blocks) keep each response small.
-const MAX_LOG_RANGE = 50_000n
+// Tenderly takes 1M+ blocks per getLogs but rate-limits bursts (429 at ~10 at once), so one call spans
+// everything since deploy; 10M blocks is about 230 days of Base blocks. Each call returns at most 3,000 logs.
+const MAX_LOG_RANGE = 10_000_000n
 const REFETCH_MS = 30_000
 const STATE_OPEN = 0
 // Mirrors IMarket.State. Proposed (2) is never set by Market; Closed and Proposed both show as closed.
