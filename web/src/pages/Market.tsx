@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowUpRight, ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useAccount } from 'wagmi'
-import { useMarkets, usePositions } from '../chain'
+import { useDashboardMarkets, useMarkets, usePositions } from '../chain'
 import { Change, ClaimButton, PAGE_SIZE, PriceChart, ProbabilityBar, ShowMore, StatusBadge, TradePanel } from '../components'
 import { ResolutionPanel } from '../resolution'
 import {
@@ -32,16 +32,23 @@ const ranges = { '1D': DAY_SECS, '1W': 7 * DAY_SECS, '1M': 30 * DAY_SECS, All: I
 export default function Market() {
   const { id } = useParams()
   const [params] = useSearchParams()
-  const { data, error } = useMarkets()
+  // Same split as Home: the summary (price, volume, question, status) renders
+  // first, and the full load (history, past trades, positions, resolution)
+  // only starts after it. The old code waited for the full load before
+  // rendering anything, so a direct landing on /market/:id took as long as
+  // the dashboard did, even though this page only needs one market.
+  const summary = useDashboardMarkets()
+  const full = useMarkets(Boolean(summary.data))
   const { address } = useAccount()
   const positions = usePositions(address)
   const [outcome, setOutcome] = useState<Outcome>(params.get('outcome') === 'NO' ? 'NO' : 'YES')
   const [range, setRange] = useState<keyof typeof ranges>('1M')
   const [activityShown, setActivityShown] = useState(PAGE_SIZE)
 
-  if (!data) return <p className="text-muted">{error ? 'Could not load market from Base Sepolia.' : 'Loading market…'}</p>
+  const markets = full.data?.markets ?? summary.data?.markets
+  if (!markets) return <p className="text-muted">{summary.error ? 'Could not load market from Base Sepolia.' : 'Loading market…'}</p>
 
-  const market = data.markets.find((m) => m.id === Number(id))
+  const market = markets.find((m) => m.id === Number(id))
   if (!market)
     return (
       <p className="text-muted">
@@ -54,7 +61,11 @@ export default function Market() {
   const payout = mine.reduce((sum, pos) => sum + positionValue(pos, market), 0)
   const canWithdrawLiquidity =
     isSettled(market) && !market.liquidityWithdrawn && address?.toLowerCase() === market.creator.toLowerCase()
-  const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
+  // Past trades (and positions, via usePositions) only exist in the full
+  // load. Showing an empty activity list before then would wrongly read as
+  // "no trades yet", so activity stays in its loading state until full lands.
+  const activity = (full.data?.trades ?? []).filter((t) => t.marketId === market.id).toReversed()
+  const detailsPending = !full.data
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
   // The last history point is stamped when markets load, so the page and chart share one clock.
   const now = market.history.at(-1)!.at
@@ -83,7 +94,7 @@ export default function Market() {
           <div className="flex items-baseline gap-2">
             <span className="text-6xl font-extrabold leading-none tracking-tighter text-yes">{pct(p)}</span>
             <span className="text-sm text-muted">chance of Yes</span>
-            <span className="ml-auto"><Change value={changeSince(market, now - from)} /></span>
+            <span className="ml-auto">{detailsPending ? <span className="text-sm text-muted">…</span> : <Change value={changeSince(market, now - from)} />}</span>
           </div>
           <ProbabilityBar p={p} />
           {available.length > 1 && (
@@ -100,11 +111,17 @@ export default function Market() {
               ))}
             </div>
           )}
-          <PriceChart points={market.history} from={from} to={now} height={200} axis />
-          <div className="flex justify-between text-xs text-muted">
-            <span>{dateTime(from)}</span>
-            <span>Now</span>
-          </div>
+          {detailsPending ? (
+            <p className="text-sm text-muted">Loading price history…</p>
+          ) : (
+            <>
+              <PriceChart points={market.history} from={from} to={now} height={200} axis />
+              <div className="flex justify-between text-xs text-muted">
+                <span>{dateTime(from)}</span>
+                <span>Now</span>
+              </div>
+            </>
+          )}
           <div className="grid grid-cols-2 border-t border-line pt-3 text-sm">
             <div><p className="text-xs text-muted">Volume</p>{compact(market.volume)} USDC</div>
             <div><p className="text-xs text-muted">Liquidity</p>{compact(liquidity)} USDC</div>
@@ -153,7 +170,14 @@ export default function Market() {
           </div>
         )}
 
-        <ResolutionPanel market={market} now={now} />
+        {detailsPending ? (
+          <div className="flex flex-col gap-3 rounded-3xl bg-surface p-5">
+            <h2 className="font-semibold">Resolution</h2>
+            <p className="text-sm text-muted">Loading resolution…</p>
+          </div>
+        ) : (
+          <ResolutionPanel market={market} now={now} />
+        )}
 
         <details open className="group rounded-3xl bg-surface p-5">
           <summary className="flex cursor-pointer list-none items-center justify-between font-semibold">
@@ -174,7 +198,9 @@ export default function Market() {
 
         <div className="flex flex-col gap-3 rounded-3xl bg-surface p-5">
           <h2 className="font-semibold">Recent activity</h2>
-          {activity.length ? (
+          {detailsPending ? (
+            <p className="text-sm text-muted">Loading past trades…</p>
+          ) : activity.length ? (
             <ul className="divide-y divide-line text-sm">
               {activity.slice(0, activityShown).map((t, i) => (
                 // Fixed grid columns and tabular digits keep every row's numbers lined up.
