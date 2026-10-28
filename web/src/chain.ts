@@ -127,12 +127,21 @@ export function useMarkets(enabled = true) {
   return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS, enabled })
 }
 
+// Stage 0 for the dashboard: markets from contract reads only, no log scan
+// at all. Prices, status, close time and liquidity are correct immediately;
+// question is a placeholder and volume is 0 until the summary scan fills
+// them in. This is what makes the dashboard appear on entry even when the
+// log scan itself is slow or throttled.
+export function useMarketList() {
+  return useQuery({ queryKey: ['markets', 'list'], queryFn: loadMarketList, refetchInterval: REFETCH_MS })
+}
+
 // Dashboard-first data: prices from pool reads, plus question/category/volume
 // from the small dashboard log scan. No block timestamps, no resolver/payout
 // logs, no positions. This is what Home renders, so a slow or failing full
 // scan can no longer turn the whole dashboard into "Could not load markets".
-export function useDashboardMarkets() {
-  return useQuery({ queryKey: ['markets', 'summary'], queryFn: loadMarketSummaries, refetchInterval: REFETCH_MS })
+export function useDashboardMarkets(enabled = true) {
+  return useQuery({ queryKey: ['markets', 'summary'], queryFn: loadMarketSummaries, refetchInterval: REFETCH_MS, enabled })
 }
 
 // DEFAULT_ADMIN_ROLE is bytes32(0) in OpenZeppelin AccessControl.
@@ -185,6 +194,12 @@ async function loadMarketStates(blockNumber: bigint) {
   )
   const states = await Promise.all(addresses.map((address) => readMarket(address, blockNumber)))
   return { addresses, states }
+}
+
+async function loadMarketList(): Promise<{ markets: Market[] }> {
+  const blockNumber = await client.getBlockNumber()
+  const { states } = await loadMarketStates(blockNumber)
+  return { markets: states.map((state, i) => toMarketSummary(i + 1, state, undefined, [])) }
 }
 
 async function loadMarketSummaries(): Promise<{ markets: Market[]; logScanFailed: boolean }> {
