@@ -124,7 +124,7 @@ const blockTimes = new Map<bigint, number>()
 // and (via usePositions) user positions. Loaded in the background on the
 // dashboard, and directly on the market/portfolio/collect pages.
 export function useMarkets(enabled = true) {
-  return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS, enabled })
+  return useQuery({ queryKey: ['markets'], queryFn: loadMarkets, refetchInterval: REFETCH_MS, enabled, retry: 1, retryDelay: 1_000 })
 }
 
 // Stage 0 for the dashboard: markets from contract reads only, no log scan
@@ -133,7 +133,10 @@ export function useMarkets(enabled = true) {
 // them in. This is what makes the dashboard appear on entry even when the
 // log scan itself is slow or throttled.
 export function useMarketList() {
-  return useQuery({ queryKey: ['markets', 'list'], queryFn: loadMarketList, refetchInterval: REFETCH_MS })
+  // One retry only: the 30s refetch retries a dead RPC anyway, and TanStack's
+  // default 3 retries would multiply a 20s transport failure into a minute
+  // of "Loading markets…" before any error (or any later stage) appears.
+  return useQuery({ queryKey: ['markets', 'list'], queryFn: loadMarketList, refetchInterval: REFETCH_MS, retry: 1, retryDelay: 1_000 })
 }
 
 // Dashboard-first data: prices from pool reads, plus question/category/volume
@@ -141,7 +144,7 @@ export function useMarketList() {
 // logs, no positions. This is what Home renders, so a slow or failing full
 // scan can no longer turn the whole dashboard into "Could not load markets".
 export function useDashboardMarkets(enabled = true) {
-  return useQuery({ queryKey: ['markets', 'summary'], queryFn: loadMarketSummaries, refetchInterval: REFETCH_MS, enabled })
+  return useQuery({ queryKey: ['markets', 'summary'], queryFn: loadMarketSummaries, refetchInterval: REFETCH_MS, enabled, retry: 1, retryDelay: 1_000 })
 }
 
 // DEFAULT_ADMIN_ROLE is bytes32(0) in OpenZeppelin AccessControl.
