@@ -1,0 +1,122 @@
+# Protocol invariants
+
+This file lists the properties the Sooth contracts must keep true. Each row names the code that protects it and an existing test that exercises it, or says "not tested yet". It was written by reading `contracts/src` and `contracts/test` at the commit this branch was cut from.
+
+## Status of testing
+
+- Every test named below is a unit test or a single-sequence fuzz test. They check one scenario, or one fixed order of calls with fuzzed amounts.
+- **Stateful invariant tests do not exist yet.** There is no `StdInvariant` contract, handler or `invariant_*` function in `contracts/test`. They are task P1-2.
+- A "Test" cell names a test that touches the invariant, not one that proves it for all call sequences. Where a test checks only part of a statement, the "Notes" column says which part.
+- Test names are quoted as they appear in the file. `test_RevertWhen_ResolvingTwice` exists in both `MarketResolution.t.sol` and `ChainlinkResolver.t.sol`, so those rows give the file.
+
+### Rows task P1-2 must cover
+
+P1-2 must add handler-driven invariants for: INV-COL-1, INV-COL-2, INV-COL-3, INV-COL-5, INV-COL-6, INV-TIME-2, INV-RES-1, INV-RES-2, INV-RED-1, INV-RED-2, INV-RED-4, INV-BND-1, INV-BND-4, INV-BND-5, INV-BND-7.
+
+The handler needs several actors who buy, sell, redeem and withdraw. It also needs the arbitrator, a proposer, a disputer and the judge, plus a clock warp. Ghost variables must track deposits, payouts, fees and bonds. The bond rows need `OptimisticResolver`, so the handler must run more than one market.
+
+Rows that say "not tested yet" and are not in this list are single-call checks. They need a plain unit test, not a stateful one.
+
+## Terms
+
+- **Backing**: `collateral.balanceOf(market) - accruedFees`. This is the collateral that backs outcome shares.
+- **Settled**: `Market.state()` is `Resolved` or `Cancelled`.
+- **Deadline**: `Market.resolutionDeadline() = closeTime + RESOLUTION_WINDOW` (`RESOLUTION_WINDOW` is 7 days).
+- `state()` is derived from the clock while `_state == Open`: `Open` before `closeTime`, `Closed` from `closeTime` up to but not including the deadline, `Cancelled` from the deadline on. `resolve` writes `_state = Resolved`.
+
+## 1. Collateral
+
+Source: `Market.sol` (`initialize`, `buy`, `sell`, `withdrawFees`, `redeem`, `withdrawLiquidity`), `MarketFactory.sol` (`createMarket`).
+
+| ID | Statement | Protected by | Test | Notes |
+|---|---|---|---|---|
+| INV-COL-1 | Before settlement and before any `redeem` or `withdrawLiquidity`, `totalSupply(YES) == totalSupply(NO)` for the market's token ids. | `Market.initialize`, `Market.buy`, `Market.sell`. Every mint or burn goes through `_yesNoBatch(amount)`, which uses the same amount for both ids. | `test_SellQuoteMatchesExecutionAndBurnsFromMarketCustody`; `test_CreateMarket_MovesCollateralAndSeedsPools` | The sell test checks both supplies fall by the same `gross`. The creation test checks both equal `LIQUIDITY`. After settlement `redeem` and `withdrawLiquidity` burn YES and NO by different amounts, so the equality no longer holds by design. |
+| INV-COL-2 | Before settlement, `collateral.balanceOf(market) - accruedFees == totalSupply(YES) == totalSupply(NO)`. If someone sends collateral to the market directly, the left side is greater. | `Market.buy` (mints `net = collateralIn - fee`), `Market.sell` (burns `collateralOut + fee`), `Market.initialize` (`balance >= initialLiquidity`). | `testFuzz_BuyThenSellCannotProfit` (calls `_assertFullyBacked` after a buy and a sell); `test_BuyQuoteMatchesExecutionAndAccountsForFee` | `testFuzz_CreateMarket_FullyCollateralized` only asserts `>=`. `test_DonationsDoNotChangeRecordedReserves` shows the donation case is strictly greater. |
+| INV-COL-3 | Fees are accounted apart from backing. Each trade adds exactly its fee to `accruedFees`. The fee never mints shares and is never counted in `yesPool` or `noPool`. | `Market.buy`, `Market.sell` (`accruedFees += fee`), `_fee` (`FEE_BPS` = 100 of `BPS_DENOMINATOR` = 10,000, rounded up). | `test_BuyQuoteMatchesExecutionAndAccountsForFee` | The test checks one buy: `accruedFees == fee` and the contract balance is `LIQUIDITY + TRADE`. `test_SellQuoteMatchesExecutionAndBurnsFromMarketCustody` checks `accruedFees` after a buy then a sell. Not checked over long sequences. |
+| INV-COL-4 | `withdrawFees` pays only `accruedFees`, only to `creator` (any caller may trigger it), and leaves backing and pools unchanged. A second call reverts. | `Market.withdrawFees` (`state() != Open`, `NoFeesToWithdraw`, zeroes `accruedFees` before the transfer). | `test_WithdrawFeesAtClosePaysOnlyCreatorAndPreservesBacking`; `test_FailedFeeTransferRestoresAccruedFees`; `test_FeeTransferCallbackCannotReenterWithdrawal` | |
+| INV-COL-5 | Before settlement, the market's own ERC-1155 balances equal `yesPool` and `noPool`. Both pools stay above zero. Unsolicited token or collateral transfers do not change the recorded pools. | `Market.buy`, `Market.sell` (`_setPools` with the same amounts as the mint, burn and transfer). | `test_BuyQuoteMatchesExecutionAndAccountsForFee` (calls `_assertInventoryMatchesReserves`); `test_DonationsDoNotChangeRecordedReserves` | Equality is checked by `_assertInventoryMatchesReserves` in single trades only. |
+| INV-COL-6 | A trade never lowers `yesPool * noPool`. A buy followed by a sell of the same shares cannot leave the trader with more collateral than before. | `Market._quoteBuy` (rounds pool-after up with `Math.Rounding.Ceil`), `Market._quoteSell` (binary search keeps the product from shrinking). | `testFuzz_BuyThenSellCannotProfit` | Fuzzes one buy then one sell by one trader, amounts 1 to 100 USDC. |
+| INV-COL-7 | A market starts fully collateralised. The factory holds none of the seed, and the market refuses to initialise unless it already holds `initialLiquidity`. | `MarketFactory.createMarket` (transfer, then `initialize`), `Market.initialize` (`CollateralNotReceived`), `MarketFactory.MIN_LIQUIDITY` (10e6). | `test_CreateMarket_MovesCollateralAndSeedsPools`; `test_RevertWhen_MarketInitializedWithoutCollateral`; `testFuzz_CreateMarket_FullyCollateralized`; `test_RevertWhen_LiquidityTooLow` | |
+| INV-COL-8 | No market function that moves collateral or shares can be re-entered through an ERC-1155 receive hook or a token callback. | `nonReentrant` (`ReentrancyGuardTransient`) on `buy`, `sell`, `withdrawFees`, `redeem`, `withdrawLiquidity`. | `test_BuyerReceiverCannotReenterMarket`; `test_FeeTransferCallbackCannotReenterWithdrawal` | The hook tests cover `buy` re-entering `buy`, and `withdrawFees` re-entering. `sell`, `redeem` and `withdrawLiquidity` re-entry: not tested yet. |
+
+## 2. Time
+
+Source: `Market.sol` (`state`, `_requireOpen`, `_requireTradable`, `resolve`, `withdrawFees`), `OptimisticResolver.sol`, `ChainlinkResolver.sol`, `MarketFactory.sol` (`_validate`).
+
+| ID | Statement | Protected by | Test | Notes |
+|---|---|---|---|---|
+| INV-TIME-1 | No `buy`, `sell`, `quoteBuy` or `quoteSell` succeeds at or after `closeTime`. | `Market._requireOpen` (via `_requireTradable`), `Market.state`. | `test_RevertWhen_TradingAfterClose` | Warps to exactly `closeTime`. `test_State_ClosedIsDerivedFromCloseTime` checks `closeTime - 1` is Open. |
+| INV-TIME-2 | Trading is possible only in state `Open`. After `Resolved` or `Cancelled`, trades revert with `TradingClosed`. | `Market._requireOpen`. | not tested yet | The only test exercises state `Closed`. No test trades in `Resolved` or `Cancelled`. |
+| INV-TIME-3 | A trade whose `deadline` is already past reverts. | `Market._requireTradable` (`DeadlineExpired`). | `test_RevertWhen_DeadlineExpired` | This is the caller's slippage guard, not the market close. |
+| INV-TIME-4 | `resolve` cannot succeed before `closeTime`. | `Market.resolve` (requires `Closed`, else `CannotResolve`). | `test_RevertWhen_ResolvingOpenMarket`; `test_RevertWhen_ResolvingBeforeClose` (ChainlinkResolver.t.sol) | |
+| INV-TIME-5 | `resolve` cannot succeed at or after the deadline. The market is `Cancelled` from the deadline on. | `Market.state` (`block.timestamp >= resolutionDeadline()`), `Market.resolve`. | `test_RevertWhen_ResolvingAtDeadline` (MarketResolution.t.sol); `test_RevertWhen_ResolvingAfterDeadline` (ChainlinkResolver.t.sol) | Both warp to exactly the deadline. `test_StateMovesFromOpenToClosedToCancelledWithoutTransactions` checks `deadline - 1` is `Closed`. |
+| INV-TIME-6 | State follows the clock without any transaction. `Resolved` is never overridden by the clock. | `Market.state` (returns `_state` unless it is `Open`). | `test_StateMovesFromOpenToClosedToCancelledWithoutTransactions`; `test_State_ClosedIsDerivedFromCloseTime`; `test_ResolvedMarketStaysResolvedPastDeadline` | |
+| INV-TIME-7 | A market cannot be created with `closeTime <= block.timestamp`. | `MarketFactory._validate` (`CloseTimeInPast`). | `test_RevertWhen_CloseTimeInPast`; `test_RevertWhen_CloseTimeIsNow` | |
+| INV-TIME-8 | `withdrawFees` is not possible while the market is `Open`. | `Market.withdrawFees` (`TradingStillOpen`). | `test_RevertWhen_WithdrawingFeesBeforeClose` | Uses `closeTime - 1`. |
+| INV-TIME-9 | A proposal is accepted only while the market is `Closed`, and only if its challenge window ends strictly before the deadline. | `OptimisticResolver.propose` (`MarketNotClosed`, `ProposalTooLate`). | `test_RevertWhen_ProposingOpenMarket`; `test_RevertWhen_ProposingTooLate` | `ProposingTooLate` warps to `deadline - challengeWindow`, so `windowEnd == deadline` reverts. |
+| INV-TIME-10 | `dispute` works only before the challenge window ends. `finalize` works only from the window end. | `OptimisticResolver.dispute` (`ChallengeWindowClosed`), `OptimisticResolver.finalize` (`ChallengeWindowOpen`). | `test_RevertWhen_DisputingAfterWindow`; `test_RevertWhen_FinalizingDuringWindow`; `test_FinalizeResolvesMarketAndReturnsBond` | Dispute is checked at `windowEnd`, finalize at `windowEnd - 1` (reverts) and `windowEnd` (succeeds). |
+| INV-TIME-11 | `challengeWindow` is always shorter than `RESOLUTION_WINDOW`, so there is time to propose. | `OptimisticResolver` constructor (`InvalidConfig`). | `test_RevertWhen_WindowNotShorterThanResolutionWindow` | Checks equality (7 days) reverts. |
+| INV-TIME-12 | `ChainlinkResolver.configure` is rejected at or after `closeTime`. A round is accepted only if `updatedAt <= closeTime`, it is within `maxStaleness`, and no later round was updated by `closeTime`. | `ChainlinkResolver.configure` (`ConfigureAfterClose`), `_priceAtClose` (`RoundAfterClose`, `StalePrice`, `RoundSuperseded`). | `test_RevertWhen_ConfiguringAfterClose`; `test_AcceptsRoundUpdatedExactlyAtClose`; `test_RevertWhen_RoundUpdatedAfterClose`; `test_AcceptsPriceExactlyAtMaxStaleness`; `test_RevertWhen_PriceIsStale`; `test_RevertWhen_RoundSupersededBeforeClose` | |
+
+## 3. Authorization
+
+Source: `Market.sol`, `OutcomeToken.sol`, `MarketFactory.sol`, `OptimisticResolver.sol`, `ChainlinkResolver.sol`.
+
+| ID | Statement | Protected by | Test | Notes |
+|---|---|---|---|---|
+| INV-AUTH-1 | Only the market's `arbitrator` can call `Market.resolve`. | `Market.resolve` (`NotArbitrator`). | `test_RevertWhen_ResolverIsNotArbitrator` | |
+| INV-AUTH-2 | Only the judge (the `OptimisticResolver` owner) can call `rule`. | `OptimisticResolver.rule` (`onlyOwner`). | `test_RevertWhen_NonJudgeRules` | |
+| INV-AUTH-3 | Judge handover takes two steps. The new judge must accept. | `OptimisticResolver` inherits `Ownable2Step`. | `test_JudgeHandoverNeedsAcceptance` | |
+| INV-AUTH-4 | A resolver acts only on markets that name it as `arbitrator`. `OptimisticResolver` also acts only on markets the factory created. | `OptimisticResolver._requireOwnMarket` (`NotFactoryMarket`, `MarketNotUsingResolver`), `ChainlinkResolver.configure` (`MarketNotUsingResolver`). | `test_RevertWhen_MarketNotFromFactory`; `test_RevertWhen_MarketUsesOtherArbitrator`; `test_RevertWhen_MarketArbitratorIsNotResolver` | `OptimisticResolver.dispute`, `finalize`, `rule` and `refund` do not call `_requireOwnMarket`. They are guarded by `_requests[market].status`, which only `propose` can set, after the check. |
+| INV-AUTH-5 | Only the owner can call `ChainlinkResolver.configure`. A market can be configured once. | `ChainlinkResolver.configure` (`onlyOwner`, `AlreadyConfigured`). | `test_RevertWhen_NonOwnerConfigures`; `test_RevertWhen_ConfiguringTwice` | `ChainlinkResolver.resolve` is permissionless by design. The outcome comes from the configured feed and round, not the caller. |
+| INV-AUTH-6 | Only a `DEFAULT_ADMIN_ROLE` holder can create markets. | `MarketFactory.createMarket` (`onlyRole`). | `test_RevertWhen_CallerIsNotAdmin`; `test_GrantedAdminCanCreate` | |
+| INV-AUTH-7 | A market clone can be initialised once, and only by the factory. The implementation contract cannot be initialised. | `Market.initialize` (`initializer`, `NotFactory`), `Market` constructor (`_disableInitializers`). | `test_RevertWhen_MarketInitializedTwice`; `test_RevertWhen_ImplementationInitialized`; `test_RevertWhen_NonFactoryInitializesClone` | |
+| INV-AUTH-8 | Only the factory can register a market with `OutcomeToken`, and a market id is registered once. | `OutcomeToken.registerMarket` (`NotFactory`, `MarketAlreadyRegistered`). | `test_RevertWhen_NonFactoryRegistersMarket`; `test_RevertWhen_MarketRegisteredTwice` | |
+| INV-AUTH-9 | Only the registered market can mint or burn its two token ids. No market can touch another's tokens, including through batch calls. | `OutcomeToken.mint`, `burn` (`onlyMarketOf`), `mintBatch`, `burnBatch` (`_requireMarketOf` per id). | `test_RevertWhen_NonMarketMints`; `test_RevertWhen_NonMarketBurns`; `test_RevertWhen_MarketMintsAnotherMarketsToken`; `test_RevertWhen_MintBatchIncludesAnotherMarketsToken`; `test_RevertWhen_BurnBatchIncludesAnotherMarketsToken` | |
+| INV-AUTH-10 | `withdrawFees` and `withdrawLiquidity` always pay `creator`, whoever calls. | `Market.withdrawFees`, `Market.withdrawLiquidity` (`collateral.safeTransfer(creator, ...)`). | `test_WithdrawFeesAtClosePaysOnlyCreatorAndPreservesBacking`; `test_WithdrawFeesUsesEachMarketsCreator`; `test_WithdrawLiquidityPaysWinningPoolToCreator` | The test calls come from `alice` or the test contract, not `creator`. |
+
+## 4. Resolution
+
+Source: `Market.resolve`, `Market.state`, `OptimisticResolver`, `ChainlinkResolver`.
+
+| ID | Statement | Protected by | Test | Notes |
+|---|---|---|---|---|
+| INV-RES-1 | A market is resolved at most once. After `Resolved`, `resolve` reverts. | `Market.resolve` (`current != Closed` reverts `CannotResolve`). | `test_RevertWhen_ResolvingTwice` (MarketResolution.t.sol); `test_RevertWhen_ResolvingTwice` (ChainlinkResolver.t.sol) | Both assert only the revert. Neither reads `winningOutcome` after the second call. |
+| INV-RES-2 | `winningOutcome` never changes after `resolve` sets it, across any later call or time change. | `Market.resolve` is the only writer of `winningOutcome`. | `test_ResolvedMarketStaysResolvedPastDeadline` | The test checks the state stays `Resolved`, not the outcome value. The unchanged-value claim is not tested yet. |
+| INV-RES-3 | A market past its deadline without a resolution is `Cancelled` and can never be resolved. | `Market.state`, `Market.resolve`. | `test_RevertWhen_ResolvingAtDeadline` (MarketResolution.t.sol) | |
+| INV-RES-4 | An `OptimisticResolver` request moves forward only: `None` to `Proposed`, then `Disputed` or `Settled`, then `Settled`. It is proposed once, disputed once and settled once. | `OptimisticResolver.propose`, `dispute`, `finalize`, `rule`, `refund` (each checks `status`). | `test_RevertWhen_ProposingTwice`; `test_RevertWhen_DisputingTwice`; `test_RevertWhen_DisputingWithoutProposal`; `test_RevertWhen_FinalizingDisputed`; `test_RevertWhen_RulingUndisputed`; `test_RevertWhen_ProposingAfterFinalize`; `test_RevertWhen_RefundingTwice` | Finalize twice and rule twice: not tested yet. |
+| INV-RES-5 | `OptimisticResolver` resolves the market only through `finalize` (undisputed, window over) or `rule` (disputed, judge). | `OptimisticResolver.finalize`, `OptimisticResolver.rule` (both call `market.resolve`). | `test_FinalizeResolvesMarketAndReturnsBond`; `test_RuleForProposerPaysProposerBothBonds`; `test_RuleForDisputerPaysDisputerBothBonds` | |
+| INV-RES-6 | `ChainlinkResolver` outcome depends only on the round live at `closeTime`, the threshold and the comparison. It does not depend on who calls or when. A tie on the threshold gives `No`. | `ChainlinkResolver._priceAtClose`, `_isYes`. | `test_BelowResolvesNoOnTie`; `test_AboveResolvesNoOnTie`; `test_RevertWhen_RoundSupersededBeforeClose`; `test_RevertWhen_RoundSupersededByNextPhaseBeforeClose`; `test_AcceptsLatestRoundWhenNoLaterRoundExists` | |
+
+## 5. Redemption
+
+Source: `Market.redeem`, `Market.withdrawLiquidity`, `Market._settlementValue`, `Market.withdrawFees`.
+
+| ID | Statement | Protected by | Test | Notes |
+|---|---|---|---|---|
+| INV-RED-1 | Total collateral paid out by `redeem`, `withdrawLiquidity` and `withdrawFees` is at most what the market received. When `Resolved`, nothing is left after everyone exits. When `Cancelled`, at most 2 raw units of dust remain. | `Market._settlementValue` (winner pays 1 per share, `Cancelled` pays `(yes + no) / 2` rounded down). | `testFuzz_EveryoneExitsAndOnlyDustRemains` | One fixed order: Alice buys and may sell, Bob and Carol buy, then all exit. The test would revert on an overpay and asserts the leftover balance. `MAX_CANCEL_DUST` is 2 in the test file. It does not cover other call orders or transfers between holders. |
+| INV-RED-2 | When `Resolved`, a holder gets 1 raw unit per winning share and 0 for losing shares. | `Market._settlementValue`. | `test_WinnerRedeemsOneCollateralPerShare`; `test_RevertWhen_LoserRedeems`; `test_RedeemBurnsLosingSharesAlongsideWinners` | |
+| INV-RED-3 | When `Cancelled`, a holder gets `(yes + no) / 2`, rounded down. | `Market._settlementValue`. | `test_CancelledRedeemPaysHalfPerShare`; `test_CancelledRedeemRoundsDown` | |
+| INV-RED-4 | No double claims. `redeem` burns the holder's YES and NO, so a second call reverts. `withdrawLiquidity` runs once. `withdrawFees` zeroes `accruedFees`. | `Market.redeem` (`burnBatch`, `NothingToRedeem`), `Market.withdrawLiquidity` (`liquidityWithdrawn`), `Market.withdrawFees`. | `test_RevertWhen_RedeemingTwice`; `test_RevertWhen_WithdrawingLiquidityTwice`; `test_WithdrawFeesAtClosePaysOnlyCreatorAndPreservesBacking` | The fees test ends with a second `withdrawFees` reverting `NoFeesToWithdraw`. Redeem by a second holder after a transfer, and `redeem` after `withdrawLiquidity`: not tested yet. |
+| INV-RED-5 | `redeem` and `withdrawLiquidity` revert unless the market is settled. | `Market._settlementValue` (`NotSettled`). | `test_RevertWhen_RedeemingBeforeSettlement`; `test_RevertWhen_WithdrawingLiquidityBeforeSettlement` | Both test state `Closed`. `Open` is not tested. |
+| INV-RED-6 | `withdrawLiquidity` pays the creator the winning pool, or half the pool total if `Cancelled`, and burns the pool tokens. | `Market.withdrawLiquidity`. | `test_WithdrawLiquidityPaysWinningPoolToCreator`; `test_WithdrawLiquidityAfterCancelPaysHalfThePool`; `test_PriceStillReadableAfterLiquidityWithdrawn` | |
+| INV-RED-7 | Token ids are unique per market and outcome, so a share of one market cannot be redeemed in another. | `OutcomeTokenId.compute`, `OutcomeToken.marketOf`. | `test_CreateMarket_TokenIdsUniqueAcrossMarkets` | Checks ids differ and `marketOf` maps back. A cross-market `redeem` attempt: not tested yet. |
+
+## 6. Bonds
+
+Source: `OptimisticResolver.sol`. `bond` and `bondToken` are immutable. `bondToken` is the factory's collateral.
+
+| ID | Statement | Protected by | Test | Notes |
+|---|---|---|---|---|
+| INV-BND-1 | The resolver's `bondToken` balance equals `bond` times the number of bonds held by open requests: one for `Proposed`, two for `Disputed`, none for `None` or `Settled`. If someone sends tokens directly, the balance is greater. | `OptimisticResolver.propose`, `dispute` (pull `bond`), `finalize`, `rule`, `refund` (pay out, set `Settled`). | `test_ProposePullsBondAndRecordsRequest`; `test_DisputePullsBondAndRecordsDisputer`; `test_FinalizeResolvesMarketAndReturnsBond`; `test_RuleForProposerPaysProposerBothBonds`; `test_RefundAfterCancelReturnsBothBondsWhenDisputed` | These use `_assertHeldBonds(n)`, which asserts `balanceOf(resolver) == n * BOND`. One market per test. Several markets at once: not tested yet. |
+| INV-BND-2 | `finalize` returns exactly one `bond` to the proposer. | `OptimisticResolver.finalize`. | `test_FinalizeResolvesMarketAndReturnsBond` | |
+| INV-BND-3 | `rule` pays `2 * bond` to the winner. The proposer wins if the ruling equals the proposed outcome, otherwise the disputer wins. | `OptimisticResolver.rule`. | `test_RuleForProposerPaysProposerBothBonds`; `test_RuleForDisputerPaysDisputerBothBonds` | |
+| INV-BND-4 | If the market is `Cancelled`, `refund` returns one `bond` to the proposer, and one to the disputer if there was a dispute. Nobody gains or loses. | `OptimisticResolver.refund` (`MarketNotCancelled`). | `test_RefundAfterCancelReturnsProposerBond`; `test_RefundAfterCancelReturnsBothBondsWhenDisputed`; `test_RevertWhen_RefundingBeforeCancel` | |
+| INV-BND-5 | Each bond is paid out once. Status is set to `Settled` before any transfer, and every payout path requires `Proposed` or `Disputed`. | `OptimisticResolver.finalize`, `rule`, `refund` (status write before `safeTransfer`), `nonReentrant`. | `test_RevertWhen_RefundingTwice`; `test_RevertWhen_RefundingWithoutRequest` | Finalize twice, rule twice, and a re-entrant token callback: not tested yet. |
+| INV-BND-6 | A bond is pulled in full at `propose` and `dispute`. Without allowance the call reverts and no request is recorded. | `OptimisticResolver.propose`, `dispute` (`safeTransferFrom`). | `test_RevertWhen_ProposerHasNotApproved`; `test_ProposePullsBondAndRecordsRequest` | Dispute with no allowance: not tested yet. |
+| INV-BND-7 | Every funded request ends in a payout. If no one resolves before the deadline, `refund` frees the bonds. A bond is never stuck. | `OptimisticResolver.finalize`, `rule`, `refund`, `Market.state`. | not tested yet | Each branch is tested alone. The whole property over sequences is not. |
+
+## Known gaps in the documented behaviour
+
+- `docs/trading-engine.md` says initialisation "verifies its actual YES/NO balances exactly match the recorded reserves". `Market.initialize` only checks the collateral balance (`balance < initialLiquidity` reverts) and then mints the pools. No such balance check is in the code. This file follows the code.
+- `OptimisticResolver` pushes bonds (see the `@dev shortcut` comment in the contract). A bond token that blocks a recipient makes that settlement revert. That is outside these invariants and is not tested.
