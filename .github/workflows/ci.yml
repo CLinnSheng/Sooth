@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, lin/integration]
   push:
-    branches: [main]
+    branches: [main, lin/integration]
   workflow_dispatch:
 
 permissions:
