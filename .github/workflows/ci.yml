@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, lin/integration]
+  push:
+    branches: [main, lin/integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the run still going for the previous one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  contracts:
+    name: Contracts (fmt, build, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # Pinned to the version the team formats with, so fmt rules don't change under us.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+
+      - name: Check formatting
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Test
+        run: forge test -vvv
+
+  bot:
+    name: Bot (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: bot/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Install Chromium for the browser tests
+        run: uv run playwright install --with-deps chromium
+
+      # test_browser.py skips itself when Chromium is missing; fail instead so it can't silently stop running.
+      - name: Test
+        run: |
+          uv run pytest -rs | tee pytest.log
+          if grep -q "Chromium not installed" pytest.log; then
+            echo "::error::Browser tests were skipped: Chromium is not installed"
+            exit 1
+          fi
