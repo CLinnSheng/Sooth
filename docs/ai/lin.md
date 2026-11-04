@@ -19,6 +19,7 @@ Times are local time (UTC+8) unless marked UTC. The tool was Claude Code with a 
 | 5 | Resolution (E3) built twice, with clashing interfaces | Process | Process fixed; work lost |
 | 6 | Gaps found in review of the merged resolution code | Review findings | Open |
 | 7 | Orchestrator slips in Session 6 | Process | Partly fixed |
+| 8 | Invariant tests merged without running CI's build step; CI broke | Process / verification | Fixed |
 
 ---
 
@@ -341,3 +342,42 @@ There was also an agent counting slip caught by the orchestrator: the P1-1 agent
 - 7c, 7d: rows S6-7 and S6-14 exist with the late note. Nothing stops a repeat: TODO: evidence (no rule or check added).
 - 7e: `actionlint .github/workflows/ci.yml`: no output, exit code 0 (run 2026-11-04). A GitHub Actions run for `f8fcadc` on `lin/integration`: TODO: evidence (run link).
 - 7b fix in the skill file: step 5 of `.claude/skills/orchestrate/SKILL.md` now says to create worktrees by hand with `git worktree add` in the scratchpad instead of `isolation: "worktree"` (2026-11-04, `actions.md` S7-21). Used for P0-2 and P1-6 (S7-8): both agents ran in parallel without errors.
+
+---
+
+## 8. Invariant tests merged without running CI's build step; CI broke
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-04 |
+| Tool | Claude Code (Claude Opus), main session acting as orchestrator, plus the `test-security` agent |
+| Prompt / context given | User: "since you are very fast and efficient, can we not finish all today?" The orchestrator merged agent work into `lin/integration` after its own checks. |
+| Commit | Bug: merge `3159dec` (P1-2, test `e6485bd`). Fix: branch `lin/fix/ci-size-check` (this entry's commit) |
+| Files affected | `.github/workflows/ci.yml`, `contracts/test/invariant/MarketHandler.sol` |
+| Severity | Medium |
+
+### Summary
+
+The P1-2 invariant handler `MarketHandler` compiles to 34,326 bytes, over the EIP-170 limit of 24,576. CI's step `forge build --sizes` fails on any contract over the limit, including test contracts, so every CI run on `lin/integration` after `3159dec` would fail at "Build". The orchestrator merged and pushed without noticing.
+
+### Why the AI made the mistake
+
+Tool misuse in verification: the orchestrator's checks were `forge test` and `forge fmt --check` (`actions.md` S7-71), not the exact commands in `ci.yml`. `forge test` does not enforce the size limit, so it passed. The orchestrator also had no way to see GitHub Actions results (no `gh` CLI), and did not ask the user to check. Speed was being optimised ("finish all today").
+
+### Why it is problematic
+
+A red CI on the integration branch hides real failures in later pushes, and the reviewed PR to `main` could not be merged with a required check failing. It also broke a claim already in our docs (CI-4 "build succeeds").
+
+### How we fixed it
+
+- Found by the next agent (P2-7, `actions.md` S7-74..S7-89), which ran every command listed in `testing.md`.
+- `ci.yml`: the size check now covers deployable contracts only: `forge build --sizes --skip './test/**' --skip './script/**'`; `forge test` still compiles and runs every test.
+- Process: verify agent work with the exact CI commands, not a subset.
+
+### Evidence the fix works
+
+- Before: `forge build --sizes` exit 1, `MarketHandler | 34,326 | ... | -9,750`, `Error: some contracts exceed the runtime size limit (EIP-170: 24576 bytes)`.
+- After (F1): new step exit 0 on the same commit.
+- Still protective (F2): a temporary 26,308-byte contract in `src/` makes the new step exit 1; file removed afterwards.
+- F3: `forge test` 195 passed, 0 failed. F4: actionlint exit 0.
+- GitHub Actions run on `lin/integration` after the fix: TODO: evidence (run link).
