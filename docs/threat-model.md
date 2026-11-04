@@ -164,7 +164,7 @@ guards, not the model's resistance. TODO: evidence (a prompt-injection test agai
 | K-3 | No L2 sequencer uptime check in `ChainlinkResolver` | Accepted; Base Sepolia has no uptime feed; P2-2 optional part **skipped** | `ChainlinkResolver.sol` `@dev shortcut`; `docs/chainlink-resolver.md` "Limits"; `work_plan.md` P2-2 |
 | K-4 | No INVALID result; ambiguous markets wait 7 days and cancel | Open; P2-1 optional | `docs/ai/lin.md` 6a; `work_plan.md` P2-1 |
 | K-5 | Chainlink ties resolve NO | Accepted design, stated in spec wording | `docs/chainlink-resolver.md`; `test_BelowResolvesNoOnTie` |
-| K-6 | Donated collateral and outcome tokens stay in the market | Accepted (donor's loss) | `docs/ai/lin.md` 6e; `docs/invariants.md` INV-COL-2 |
+| K-6 | Donated collateral and outcome tokens stay in the market | Accepted (donor's loss) | `docs/ai/lin.md` 6e; `docs/invariants.md` INV-COL-2; shown by `invariant_COL_5_inventoryMatchesPools` (after `withdrawLiquidity` only the donated YES/NO remain) |
 | K-7 | Creator keeps fees in a cancelled market | Intended; to be confirmed by the team | `docs/security-analysis.md` §2 item 4 |
 | K-8 | Up to 2 raw units of dust remain in a cancelled market | Accepted (rounds down, never overpays) | `Market._settlementValue` comment; `docs/invariants.md` INV-RED-1 |
 | K-9 | Judge and admin are single keys; judge controls every optimistic market (R-3) | Accepted for testnet | `docs/optimistic-resolver.md` (multisig handover) |
@@ -195,32 +195,33 @@ The first two rows use names from the skipped P2-2 plan (`work_plan.md`); they a
 | Stateful invariant tests over all rows in `docs/invariants.md`; external audit | K-12 |
 | Real USDC instead of `MockUSDC` (anyone can mint `MockUSDC`) | All collateral assets |
 
-## 7. Order book (Bonus 1, in progress)
+## 7. Order book (Bonus 1)
 
-`OutcomeOrderBook` is being built on another branch. It is **not** on this branch, and its tests have not
-landed. Everything below is **design-level**, taken from `secondary_trading_plan.md` §4a ("Known limits")
-and §6a (planned tests OB-1 to OB-18). Re-check against the code and tests once merged.
+`OutcomeOrderBook` is merged (`lin/integration`, commit `99bcf7a`) with 38 unit and fuzz tests in
+`contracts/test/OutcomeOrderBook.t.sol` and stateful invariants INV-OB-1 to INV-OB-5 in
+`contracts/test/invariant/SoothInvariants.t.sol`. Reference: `docs/order-book.md`. It is not deployed yet.
 
-Design summary (§4a): holders `list` shares into escrow at a price; buyers `buy(market, outcome, shares,
-maxPrice, maxListings)` fill cheapest first, oldest first at the same price; `cancel` works in any state.
-`nonReentrant` on `list`, `buy`, `cancel`; state updated before every transfer; no fee.
+Summary: holders `list` shares into escrow at a price; buyers `buy(market, outcome, shares, maxPrice,
+maxListings)` fill cheapest first, oldest first at the same price, paying each seller directly; `cancel`
+works in any state. `nonReentrant` on `list`, `buy`, `cancel`; state updated before every transfer; no fee.
 
-| ID | Threat | L / I | Planned mitigation | Residual | Planned test |
+| ID | Threat | L / I | Mitigation | Residual | Test |
 |---|---|---|---|---|---|
-| B-1 | Gas grows on insert: `list` walks the price-sorted list from the head | M / L | Fine for a testnet demo; a hint parameter would fix it | Many cheap listings make listing expensive (gas griefing) | TODO: evidence |
-| B-2 | `buy` runs out of gas over many listings | M / M | `maxListings` caps the listings one `buy` touches | Buyer may need several calls | OB-7 |
-| B-3 | Seller blocked by USDC makes a fill revert | L / M | Seller can still `cancel` | Until cancelled, the listing blocks buys that reach it | TODO: evidence (no planned test named) |
-| B-4 | Front-running a buy | M / M | `maxPrice` caps what the buyer pays | Buyer can still lose up to `maxPrice` per share | OB-6 |
-| B-5 | Reentrancy through the buyer's ERC-1155 hook during the share transfer | M / H | `nonReentrant`; state before transfers; shares sent at the end | Design only | OB-14, OB-18 |
-| B-6 | Escrow over-filled or shares sold twice | L / H | Shares held in escrow; fills reduce the listing first | Design only | OB-13, OB-15 |
-| B-7 | Trading after the outcome is known | M / M | `list` and `buy` only while `Open`; `cancel` in any state | Same as C-16 | OB-11 |
-| B-8 | Wrong market | L / M | Market must come from our `MarketFactory` | Design only | OB-12 |
+| B-1 | Gas grows on insert: `list` walks the price-sorted list from the head (tail shortcut for the most expensive listing) | M / L | Fine for a testnet demo; a position hint would fix it | Many cheap listings make listing expensive (gas griefing) | Not measured for insert. `test_Gas_BuyOneVersusTenListings` measures `buy`: 157,339 gas for 1 listing, 657,640 for 10 |
+| B-2 | `buy` runs out of gas over many listings | M / M | `maxListings` caps the listings one `buy` touches | Buyer may need several calls | `test_Buy_StopsAtMaxListings`, `test_Buy_PartialLastListingCountsAsTouched` |
+| B-3 | Seller blocked by USDC at the head of a book | L / M | Seller can still `cancel` | Every `buy` on that book reverts until the seller cancels; `maxPrice` and `maxListings` cannot skip the head. Pull payments would fix it (interface change, not made) | No test (MockUSDC has no blacklist). Noted in `OutcomeOrderBook.sol` (`shortcut:` comment) and `docs/order-book.md` |
+| B-4 | Front-running a buy | M / M | `maxPrice` caps what the buyer pays per share | Buyer can still pay up to `maxPrice` | `test_Buy_StopsAboveMaxPrice`, `test_RevertWhen_NothingAtOrBelowMaxPrice` |
+| B-5 | Reentrancy through the buyer's ERC-1155 hook during the share transfer | M / H | `nonReentrant`; state before transfers; shares sent once at the end | None found | `test_RevertWhen_ReenteringBuyFromReceiver`, `..._ReenteringCancelFromReceiver`, `..._ReenteringListFromReceiver`; mutation: removing `nonReentrant` from `buy` fails all three (`actions.md` S7-45) |
+| B-6 | Escrow over-filled or shares sold twice | L / H | Shares held in escrow; fills reduce the listing before paying | None found | `test_Buy_CannotOverfillOrSellTwice`, `testFuzz_ConservationAcrossRandomActions`, `invariant_OB_1_escrowEqualsOpenListings`; mutation: skipping `remaining -= fill` fails OB-1 and OB-4 |
+| B-7 | Trading after the outcome is known | M / M | `list` and `buy` only while `Open`; `cancel` in any state | Same as C-16 | `test_RevertWhen_TradingAtClose_CancelStillWorks`, `..._TradingAfterResolve_...`, `..._TradingAtCancelDeadline_...`; `invariant_TIME_2_tradingOnlyWhileOpen` |
+| B-8 | Wrong or fake market | L / M | Market must be `factory.markets(market.marketId())` | None found | `test_RevertWhen_MarketFromAnotherFactory`, `test_RevertWhen_MarketImpersonatesFactoryId` |
+| B-9 | Shares or collateral sent straight to the book (not via `list`) | L / L | None: not part of any listing | Stuck forever (sender's loss) | Not modelled by the invariant handler (`docs/invariants.md` section 7) |
+| B-10 | Rounding lets a buyer get shares for free | L / M | Cost rounded up per fill | Buyer may overpay by under 1 raw unit per listing | `test_Buy_RoundsCostUpSoNoFillIsFree`, `invariant_OB_4_buyersPayExactlyWhatSellersReceive` |
 
 ## 8. Missing evidence
 
 - TODO: evidence. Prompt-injection test against a real LLM (O-2).
 - TODO: evidence. Test of a last-second proposal plus dispute showing how little time the judge has (R-5, K-2).
 - TODO: evidence. Re-entrant bond-token test for `OptimisticResolver` (C-4, INV-BND-5).
-- TODO: evidence. Test showing donated outcome tokens stay after `withdrawLiquidity` (K-6).
 - TODO: evidence. Behaviour of the website's RPC when one `getLogs` range exceeds the provider's log limit (O-6).
-- TODO: evidence. All order-book rows (section 7) until `OutcomeOrderBook` and its tests are merged.
+- TODO: evidence. Order book: insert gas growth (B-1) and a USDC-blacklisted seller (B-3) are not tested.
