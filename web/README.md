@@ -4,7 +4,7 @@ The Sooth frontend is a React and TypeScript application built with Vite. It rea
 
 ## Setup and commands
 
-Use a Node.js version supported by the installed Vite release: Node.js `^20.19.0` or `>=22.12.0`. The project specifies npm `12.2.1` in `package.json`. From `web/`, install the locked dependencies and start the development server:
+Use Node.js `22.22.0` or later for the current lockfile. The project specifies npm `12.2.1` in `package.json`. From `web/`, install the locked dependencies and start the development server:
 
 ```sh
 npm ci
@@ -26,6 +26,20 @@ The package has no frontend test script. Contract tests are documented in the re
 The frontend targets Base Sepolia. `src/contracts.ts` contains the factory, collateral, outcome-token, and resolver addresses and the factory deployment block used for event scans. The configured collateral is the deployment's six-decimal MockUSDC. Running Vite locally still connects to these configured contracts; it does not automatically use a local chain or deployment. A different deployment requires updating the relevant network and contract configuration.
 
 `src/wagmi.ts` configures the Base Sepolia RPC transport and wallet connectors. To enable WalletConnect, add a valid `VITE_WALLETCONNECT_PROJECT_ID` to `web/.env.local`; `web/.env.example` shows the variable name. If the variable is absent or empty, WalletConnect is disabled and injected browser-extension wallets remain available. The example value is a placeholder, not a project ID.
+
+## Fund a test wallet
+
+To buy shares, seed a market, or post an optimistic bond, the relevant wallet needs the configured MockUSDC collateral. The wallet sending each transaction also needs Base Sepolia ETH for gas. Ordinary USDC is a different token.
+
+The configured test token provides a permissionless `mint(address,uint256)` function. With Foundry installed, set `RPC_URL` to a Base Sepolia RPC endpoint, `WALLET` to the recipient address, and `ACCOUNT` to a funded Foundry keystore name. This example sends a transaction that mints 100 MockUSDC to `WALLET`:
+
+```sh
+cast send 0x5f29331BBBA6f605942f5de0B217359F3C7B7c51 \
+  'mint(address,uint256)' "$WALLET" 100000000 \
+  --rpc-url "$RPC_URL" --account "$ACCOUNT"
+```
+
+MockUSDC uses six decimals, so `100000000` raw units represent 100 tokens. The address is the frontend's configured `USDC` in `src/contracts.ts`; check that configuration if the deployment changes. This mint function is specific to the test token and does not apply to arbitrary collateral.
 
 ## Application and data flow
 
