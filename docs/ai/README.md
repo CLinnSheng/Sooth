@@ -4,6 +4,8 @@ This folder holds our evidence of AI mistakes. It feeds the AI Audit Report for 
 
 Each entry records one case where an AI tool gave wrong, unsafe or misleading output, and how we found and fixed it.
 
+The report built from these entries is [`docs/ai-audit-report.md`](../ai-audit-report.md).
+
 ## Rule
 
 - Only real failures and real evidence.
