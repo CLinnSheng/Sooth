@@ -16,8 +16,8 @@ interface IMarketFactory {
         /// @dev Starting YES probability in basis points. Must be 5000 (50/50) for now;
         ///      kept in the interface so custom odds can be added without an ABI change.
         uint16 initialYesProbabilityBps;
-        /// @dev Spec JSON: question, category, rules, source. Emitted in MarketCreated, not stored;
-        ///      the market keeps only its keccak256, which the factory computes.
+        /// @dev Nonempty spec text, emitted in MarketCreated. The market keeps only its keccak256,
+        ///      which the factory computes. The frontend expects JSON with question, category, rules, and source.
         string spec;
         uint256 initialLiquidity;
     }
