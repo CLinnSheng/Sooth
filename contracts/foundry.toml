@@ -11,4 +11,17 @@ remappings = [
 [fuzz]
 runs = 1000
 
+# Stateful invariant tests (test/invariant). Sized so the full `forge test` stays well under a minute
+# locally and in CI. Handlers catch expected reverts themselves, so a revert is not a failure.
+[invariant]
+runs = 64
+depth = 64
+fail_on_revert = false
+
+# Heavier run for reports: FOUNDRY_PROFILE=deep forge test --match-path 'test/invariant/*'
+[profile.deep.invariant]
+runs = 512
+depth = 128
+fail_on_revert = false
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
