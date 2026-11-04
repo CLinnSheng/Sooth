@@ -1,46 +1,72 @@
 # Trading engine
 
-Each market clone is its own two-outcome constant-product AMM. The factory seeds it with six-decimal collateral; the market mints an equal number of YES and NO shares into its own ERC-1155 inventory. Shares use the collateral's raw units: `1e6` units is one whole outcome share. ERC-1155 has no standard decimals field; clients can read `decimals()` from the market's collateral token.
+Each market clone implements a two-outcome constant-product automated market maker (AMM). Its recorded YES and NO reserves determine prices and trade amounts. The market holds outcome shares in the factory's shared ERC-1155 contract and uses the factory's fixed six-decimal collateral token.
 
-At initialization, `yesPool` and `noPool` are both `initialLiquidity`. The market checks the collateral arrived and verifies its actual YES/NO balances exactly match the recorded reserves. Later unsolicited transfers do not alter reserves or quotes; actual inventory may exceed reserves, never fall below them through supported trades.
+## Pool model and prices
 
-## Trading
+At creation, the market records equal YES and NO reserves and mints the corresponding shares to itself. See [market creation and outcome tokens](market-creation-explained.md) for seeding and collateral requirements.
 
-Trades are open to any address while `market.state() == Open`, before `closeTime`. The quote views use current recorded reserves and need no token balance or approval. Execution functions accept a deadline and minimum output to limit stale-quote and slippage risk.
+Collateral and shares use six-decimal raw units: `1e6` represents one whole collateral unit or one whole outcome share. ERC-1155 does not define a decimals field; the collateral token reports its decimals.
 
-For a buy of outcome reserve `a`, opposite reserve `b`, and collateral input `c`, the fee is rounded up to the next raw USDC unit. The net input `n = c - fee` buys outcome shares:
+The product of the recorded reserves is preserved or increased by rounding during supported trades. Unsolicited collateral or outcome-token transfers do not change recorded reserves or quotes; donated outcome shares can make actual token inventory exceed the reserves. After liquidity withdrawal, recorded reserves remain unchanged to preserve the final price even though the pool shares have been burned.
+
+`priceYes()` and `priceNo()` return reserve-based spot prices at 18-decimal precision:
+
+```text
+priceYes = noPool  × 1e18 / (yesPool + noPool)
+priceNo  = yesPool × 1e18 / (yesPool + noPool)
+```
+
+These are spot prices, not execution quotes: a trade also has price impact and a fee. Buying an outcome moves its price upward; selling it moves its price downward, subject to integer rounding.
+
+## Buy and sell accounting
+
+For both formulas, `a` is the selected outcome reserve and `b` is the opposite reserve. Amounts are integers in raw units. The fee is 1%, rounded up to the next raw collateral unit.
+
+### Buy
+
+For collateral input `c`, the fee is charged on `c` and net collateral is `n = c - fee`:
 
 ```text
 selectedAfter = ceil(a × b / (b + n))
 sharesOut     = a + n - selectedAfter
 ```
 
-The market receives `c`, records the fee in `accruedFees`, mints `n` YES and `n` NO shares, and sends `sharesOut` of the selected outcome to the buyer. Buyers approve the market to spend USDC first.
+The market receives `c`, accrues the fee, mints `n` YES and `n` NO shares to itself, updates the recorded reserves, and transfers `sharesOut` of the selected outcome to the buyer.
 
-For a sell of `s` shares, the engine finds the greatest integer gross collateral release `g` that preserves the reserve product:
+### Sell
+
+For input `s` shares, the market finds the greatest integer gross collateral release `g` that preserves the reserve product:
 
 ```text
 0 ≤ g ≤ min(s, b - 1)
 (a + s - g) × (b - g) ≥ a × b
 ```
 
-It computes this bound using integer binary search and full-precision division. The fee is rounded up; the seller receives `g - fee`. The seller approves the market as ERC-1155 operator. The market receives the seller's shares, burns `g` of both outcomes from its own balance, updates reserves, and pays the seller.
+The contract computes `g` using binary search and full-precision division. It charges the fee on `g`, so the seller receives `g - fee`. The market receives the selected shares, burns `g` of each outcome from its own inventory, updates reserves, accrues the fee, and transfers the net collateral to the seller.
 
-`priceYes()` and `priceNo()` report the current reserve-based probabilities at 18-decimal precision. They are spot prices; quote functions report execution amounts including fee and price impact. A trade moves the price toward the outcome bought or away from the outcome sold, while the constant-product reserve invariant is preserved or increased by rounding.
+## Quotes and execution
 
-All collateral and share amounts use six-decimal raw units: `1e6` is one USDC or one whole outcome share. The factory rejects collateral that does not report six decimals. Fee rounding, reserves, minting, burning, and collateral accounting all use those same raw units.
+`quoteBuy` and `quoteSell` use the current recorded reserves and return the output amount and fee without requiring the caller to hold tokens or grant approval. Both quotes and trades require the market to be `Open`; they revert at or after `closeTime`. Zero input or a trade that would produce zero output also reverts.
 
-## Fees and deployment
+`buy` requires the buyer to approve the market to spend the collateral input. `sell` requires the seller to call `setApprovalForAll(market, true)` on the outcome-token contract. Both accept a minimum output and a deadline. Execution reverts if the output is below the minimum or the deadline is earlier than the block timestamp; a deadline equal to the timestamp is accepted.
 
-Each market accrues the existing 1% fee in `accruedFees`, owed to its recorded `creator`: the platform wallet that supplied the seed liquidity and called `createMarket`. Fees remain as collateral in the market, outside AMM reserves. At or after `closeTime`, anyone can call `withdrawFees()` to transfer the entire accrued amount to that creator. The caller cannot choose a recipient. Withdrawal clears the fee balance before transferring, uses reentrancy protection, and emits `FeesWithdrawn`. It reverts while the market is Open or when no fees remain. A failed transfer restores the fee balance through transaction rollback.
+Quotes describe the reserves at the time they are read, which can change before execution. The frontend calculates estimates locally using floating-point arithmetic; these estimates can differ from the contract's integer calculations and fee rounding. The minimum output is the execution constraint, not a guarantee that an earlier quote remains current.
 
-Deploy the factory with `(admin, collateral)` using a six-decimal collateral token. Each market pays its own creating wallet, which may differ between platform admins. On test chains, omitting `COLLATERAL` deploys `MockUSDC`; on other chains pass the intended collateral token. Existing market clones use their original implementation, so markets deployed without withdrawal support cannot gain it; deploy a new factory for markets supporting fee withdrawal.
+## Fee accounting
 
-Example local deployment:
+Each market records fees in `accruedFees`, separately from AMM reserves, for its `creator`: the account that created the market and provided its seed collateral. At or after `closeTime`, anyone can call `withdrawFees()` to transfer the entire accrued amount to that creator. The caller cannot choose the recipient.
+
+Withdrawal reverts while the market is open or if there are no fees. It clears the recorded amount before transferring, uses reentrancy protection, and emits `FeesWithdrawn`. If the transfer fails, the transaction reverts and the fee balance is restored.
+
+## Limits and related documentation
+
+The factory requires collateral that reports six decimals, but does not verify that it is USDC or that its transfer and balance behavior is suitable. Accounting and payouts depend on the configured token behaving as expected. Existing clones use their original implementation; changing market code requires deploying a new factory for new markets.
+
+For creation and deployment prerequisites, see [market creation and outcome tokens](market-creation-explained.md) and `contracts/script/DeployMarketFactory.s.sol`. For resolver-specific behavior, see the [Chainlink](chainlink-resolver.md) and [optimistic](optimistic-resolver.md) resolver guides. The `IMarket` interface and `Market` implementation describe resolution, redemption, and liquidity withdrawal.
+
+Run the trading tests from `contracts/`:
 
 ```sh
-forge script script/DeployMarketFactory.s.sol:DeployMarketFactory \
-  --rpc-url http://127.0.0.1:8545 --broadcast --private-key <anvil-key>
+forge test --match-contract MarketTradingTest
 ```
-
-Before creation, approve seed USDC to the factory. Before trading, approve buy USDC to the market or call `setApprovalForAll(market, true)` on the outcome-token contract to sell. After trading closes, call `withdrawFees()` on the market to pay its creator; pool backing and unsolicited collateral donations remain in the market. Run `forge test` from `contracts/` for factory and trading tests.
