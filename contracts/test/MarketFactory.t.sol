@@ -153,6 +153,37 @@ contract MarketFactoryTest is Test {
         assertEq(token.marketOf(m2.noTokenId()), address(m2));
     }
 
+    function test_RevertWhen_RedeemingSharesOfOtherMarket() public {
+        (, Market a) = _create(_params());
+        (, Market b) = _create(_params());
+        usdc.mint(alice, 10e6);
+        vm.startPrank(alice);
+        usdc.approve(address(a), 10e6);
+        uint256 shares = a.buy(IMarket.Outcome.Yes, 10e6, 1, block.timestamp);
+        vm.stopPrank();
+        uint256 aYes = a.yesTokenId();
+        uint256 bYes = b.yesTokenId();
+        uint256 bBalanceBefore = usdc.balanceOf(address(b));
+
+        vm.warp(b.closeTime());
+        vm.prank(arbitrator);
+        b.resolve(IMarket.Outcome.Yes);
+        vm.prank(alice);
+        vm.expectRevert(IMarket.NothingToRedeem.selector);
+        b.redeem();
+
+        assertEq(token.balanceOf(alice, aYes), shares);
+        assertEq(token.balanceOf(alice, bYes), 0);
+        assertEq(usdc.balanceOf(alice), 0);
+        assertEq(usdc.balanceOf(address(b)), bBalanceBefore);
+
+        // A's shares still redeem in A.
+        vm.prank(arbitrator);
+        a.resolve(IMarket.Outcome.Yes);
+        vm.prank(alice);
+        assertEq(a.redeem(), shares);
+    }
+
     function test_CreateMarket_ArbitratorCanBeCreator() public {
         IMarketFactory.CreateParams memory p = _params();
         p.arbitrator = admin;

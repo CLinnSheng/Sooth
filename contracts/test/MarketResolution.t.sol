@@ -133,6 +133,20 @@ contract MarketResolutionTest is Test {
         vm.prank(arbitrator);
         vm.expectRevert(abi.encodeWithSelector(IMarket.CannotResolve.selector, IMarket.State.Resolved));
         market.resolve(IMarket.Outcome.No);
+        assertEq(uint8(market.winningOutcome()), uint8(IMarket.Outcome.Yes));
+    }
+
+    function test_WinningOutcomeUnchangedAfterLaterCallsAndTime() public {
+        _resolve(IMarket.Outcome.No);
+        _cancel();
+        vm.prank(arbitrator);
+        vm.expectRevert(abi.encodeWithSelector(IMarket.CannotResolve.selector, IMarket.State.Resolved));
+        market.resolve(IMarket.Outcome.Yes);
+        market.withdrawLiquidity();
+        vm.warp(block.timestamp + 365 days);
+
+        assertEq(uint8(market.state()), uint8(IMarket.State.Resolved));
+        assertEq(uint8(market.winningOutcome()), uint8(IMarket.Outcome.No));
     }
 
     function test_WinnerRedeemsOneCollateralPerShare() public {
