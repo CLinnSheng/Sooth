@@ -9,7 +9,8 @@ state and:
 - **Optimistic requests:** `finalize` after an undisputed window, `refund` if the market cancelled with a
   request open, and alerts (log, optional webhook) once per dispute.
 
-Stateless: everything is re-derived from the chain, so restarts and duplicate attempts are safe.
+Market state is re-derived from the chain. Retry timers and dispute-alert tracking are kept in memory
+and reset on restart; a failed webhook is not retried during the same process.
 
 ## Agent
 
