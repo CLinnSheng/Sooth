@@ -1,18 +1,17 @@
 # Sooth
 
-Sooth is a binary prediction-market application. Admins create markets with YES and NO outcome shares, traders buy and sell shares through a constant-product AMM, and holders redeem eligible shares after resolution or cancellation. Each market has its own contract and collateral balance.
-
-Markets can use a Chainlink price feed, an optimistic proposal and dispute process, or a custom wallet or contract address as arbitrator. The frontend connects to Base Sepolia; an off-chain bot can attempt Chainlink resolution and optimistic proposals and settlement.
+Sooth is a binary prediction-market application where people trade YES and NO shares on the outcome of a question.
 
 Try it live at [sooth.deva16z.workers.dev](https://sooth.deva16z.workers.dev/).
 
-## Features
+## How Sooth works
 
-- Admin-created binary markets with shared ERC-1155 outcome tokens and collateral-backed liquidity.
-- YES/NO trading with reserve-based prices, quotes, slippage limits, and a 1% fee.
-- Chainlink price-feed resolution, bonded optimistic proposals and disputes, or a custom arbitrator address.
-- Share redemption after resolution or cancellation, and creator liquidity and fee withdrawals.
-- A web interface for markets and portfolios, plus an optional bot for resolution attempts and dispute alerts.
+Sooth runs on **Base Sepolia**. Its markets use test MockUSDC as collateral; users also need Base Sepolia ETH to pay transaction fees. See the [frontend guide](web/README.md#fund-a-test-wallet) for wallet funding.
+
+1. **Create a market.** An admin sets a question, closing time, and resolution method, and supplies the initial collateral that backs the market.
+2. **Trade shares.** Traders buy and sell YES or NO shares against a constant-product automated market maker (AMM). The pool's reserves determine prices, and each trade incurs a 1% fee. See the [trading engine](docs/trading-engine.md).
+3. **Resolve the outcome.** Trading stops at the closing time. The market is resolved using a [Chainlink price feed](docs/chainlink-resolver.md), an [optimistic proposal and dispute process](docs/optimistic-resolver.md), or a designated wallet or contract. An optional bot can attempt resolution and assist with optimistic settlement.
+4. **Redeem shares.** After resolution, winning shares can be redeemed for one unit of collateral each. If the market remains unresolved for seven days after close, it is cancelled and each YES or NO share pays half a collateral unit, subject to rounding. See [market settlement and payouts](docs/market-settlement.md).
 
 ## Components
 
