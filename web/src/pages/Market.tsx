@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { Change, ClaimButton, PAGE_SIZE, PriceChart, ProbabilityBar, ShowMore, StatusBadge, TradePanel } from '../components'
+import { OrderBookPanel } from '../orderbook'
 import { ResolutionPanel } from '../resolution'
 import {
   ago,
@@ -117,6 +118,9 @@ export default function Market() {
       </aside>
 
       <section className="flex flex-col gap-6 lg:col-start-1">
+        {/* Right after the AMM panel on mobile, top of the left column on desktop; renders nothing until deployed. */}
+        <OrderBookPanel market={market} outcome={outcome} setOutcome={setOutcome} />
+
         {mine.length > 0 && (
           <div className="flex flex-col gap-3 rounded-3xl bg-surface p-5">
             <h2 className="font-semibold">Your position</h2>
