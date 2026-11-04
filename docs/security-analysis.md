@@ -16,7 +16,7 @@ slither . --filter-paths "lib/|test/|script/" --exclude-dependencies
 - Scope: every file in `contracts/src`: `ChainlinkResolver`, `Market`, `MarketFactory`, `OptimisticResolver`, `OutcomeOrderBook`, `OutcomeToken`, `libraries/`, `interfaces/` and `mocks/`.
 - Output line (P2-7 run, 2026-11-04): `. analyzed (52 contracts with 102 detectors), 23 result(s) found`. The P1-4 run printed `50 contracts`, `21 result(s)`. The two extra contracts are `OutcomeOrderBook` and `IOutcomeOrderBook`.
 - The JSON report (`--json`) agrees: `success: true`, 23 entries (6 Medium, 12 Low, 5 Informational; see table).
-- Exit code: the shell got a non-zero code (127 in Git Bash) although the run succeeded. Slither 0.11.6 defaults to `--fail-pedantic` and calls `sys.exit(-1)` when there is any finding. A CI step would need `--fail-none` or a higher `--fail-*` level to pass with these accepted findings.
+- Exit code: the shell got a non-zero exit code although the run succeeded (the exact value seen in Git Bash was 127, which there usually means "command not found"; not re-checked). Slither 0.11.6 defaults to `--fail-pedantic` and calls `sys.exit(-1)` when there is any finding. A CI step would need `--fail-none` or a higher `--fail-*` level to pass with these accepted findings.
 
 ### Note on the Session 3 run (12 results)
 
