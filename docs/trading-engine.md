@@ -63,7 +63,7 @@ Withdrawal reverts while the market is open or if there are no fees. It clears t
 
 The factory requires collateral that reports six decimals, but does not verify that it is USDC or that its transfer and balance behavior is suitable. Accounting and payouts depend on the configured token behaving as expected. Existing clones use their original implementation; changing market code requires deploying a new factory for new markets.
 
-For creation and deployment prerequisites, see [market creation and outcome tokens](market-creation-explained.md) and `contracts/script/DeployMarketFactory.s.sol`. For resolver-specific behavior, see the [Chainlink](chainlink-resolver.md) and [optimistic](optimistic-resolver.md) resolver guides. The `IMarket` interface and `Market` implementation describe resolution, redemption, and liquidity withdrawal.
+For creation and deployment prerequisites, see [market creation and outcome tokens](market-creation-explained.md) and `contracts/script/DeployMarketFactory.s.sol`. For payouts and resolver-specific behavior, see [market settlement and payouts](market-settlement.md), the [Chainlink resolver](chainlink-resolver.md), and the [optimistic resolver](optimistic-resolver.md).
 
 Run the trading tests from `contracts/`:
 

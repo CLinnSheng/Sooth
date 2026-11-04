@@ -82,4 +82,4 @@ Run Foundry commands from `contracts/`. `script/DeployMarketFactory.s.sol` accep
 forge test --match-contract MarketFactoryTest
 ```
 
-For trading, settlement, and resolver behavior, see the [trading engine](trading-engine.md), [Chainlink resolver](chainlink-resolver.md), and [optimistic resolver](optimistic-resolver.md) guides and their corresponding Foundry tests.
+For subsequent market behavior, see the [trading engine](trading-engine.md), [market settlement and payouts](market-settlement.md), [Chainlink resolver](chainlink-resolver.md), and [optimistic resolver](optimistic-resolver.md) guides and their corresponding Foundry tests.
