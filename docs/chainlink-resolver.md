@@ -2,7 +2,13 @@
 
 `ChainlinkResolver` resolves price markets using a configured Chainlink feed. A market uses it by setting the resolver as its arbitrator. After the market closes, anyone can submit the round used for settlement; the contract validates the round and calls the market's `resolve` function.
 
-## Configuration and permissions
+## When to use
+
+Use this resolver when the question can be decided by comparing a supported feed's price at market close with a fixed threshold. For example: “Was ETH/USD below $2,000 at close?” The feed and comparison determine the outcome; there is no proposal, bond, dispute, or judge.
+
+For a question that requires evidence or interpretation outside a price feed, see the [optimistic resolver](optimistic-resolver.md), which uses bonded proposals and a judge for disputes.
+
+## Configuration
 
 The resolver owner configures each market once, strictly before `closeTime`. The market must name this resolver as its arbitrator. Configuration contains a nonzero feed address, a threshold in the feed's decimals, a comparison (`Below` or `Above`), and a nonzero `maxStaleness` in seconds. The resolver does not verify that the chosen feed, threshold, or market spec describe the intended question.
 
@@ -10,7 +16,14 @@ The frontend's admin form offers the configured Base Sepolia ETH/USD feed and a 
 
 `CreateMarket.s.sol` can also create and configure a Chainlink market in one script run. Its broadcaster must be both a factory admin and the resolver owner. Approval, creation, and configuration are separate broadcast transactions, so configuration can fail after the market has been created. If that happens, check `configOf(market)`: a zero feed address means the resolver owner must configure the market before close. Once the market closes, it cannot be configured and remains unresolved until cancellation.
 
-## Price selection and outcome
+## How settlement works
+
+1. Before close, the resolver owner configures the feed, threshold, comparison, and maximum staleness.
+2. After close, anyone can submit a feed round to `resolve` before the market's resolution deadline.
+3. The contract checks that the round is valid for the closing time, compares its price with the threshold, and resolves YES or NO. There is no challenge window.
+4. If the market remains unresolved at its deadline, it is cancelled. See [market settlement and payouts](market-settlement.md).
+
+### Price selection and outcome
 
 The submitted `roundId` must identify the feed round live at `closeTime`. The resolver checks that:
 
@@ -26,7 +39,7 @@ Example spec wording:
 
 > YES if the last Chainlink ETH/USD value published at or before 2026-11-30 00:00:00 UTC is below 2000.00000000. Equal resolves NO.
 
-## Resolution paths
+## Clients and automation
 
 - The bot attempts to resolve configured, closed Chainlink markets during its polls. A failed feed read, stale round, transaction, or unavailable bot can delay or prevent resolution; a one-poll result is not guaranteed. See the [bot guide](../bot/README.md).
 - The market page offers a Resolve action for a configured, closed market and displays the feed condition and settled price.
@@ -34,7 +47,7 @@ Example spec wording:
 
 The bot, frontend, and script search the feed's current phase only. If the market closed before that phase, find the appropriate round and pass it as `ROUND_ID` to the script. The contract can validate the last round of an earlier phase when the feed's next-round reads support it.
 
-## Feed and network limitations
+## Limitations
 
 - Chainlink feeds update on heartbeat or deviation conditions; their settings vary by feed and network, and network conditions can delay updates. The settlement answer is an on-chain feed value at or before close, not necessarily the contemporaneous market price. Check the chosen feed's parameters in the [Chainlink feed catalog](https://docs.chain.link/data-feeds/price-feeds/addresses).
 - The resolver checks age relative to the market's close, but has no L2 sequencer uptime check. Staleness is not a substitute for sequencer health or a recovery grace period. Evaluate [Chainlink's L2 sequencer guidance](https://docs.chain.link/data-feeds/l2-sequencer-feeds) before deploying on an L2.
