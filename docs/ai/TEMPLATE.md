@@ -1,6 +1,6 @@
-# NNN - Short issue title
+## N. Short issue title
 
-Copy this file to `docs/ai/issues/NNN-slug.md` and fill every field.
+Copy this block to the end of your own file, `docs/ai/<name>.md`, use the next free number `N` in that file, and fill every field.
 Write only what really happened. If evidence is missing, write `TODO: evidence`.
 
 | Field | Value |
@@ -12,23 +12,23 @@ Write only what really happened. If evidence is missing, write `TODO: evidence`.
 | Files affected | e.g. `contracts/src/...` |
 | Severity | Low / Medium / High |
 
-## Summary
+### Summary
 
 One or two sentences: what the AI produced and what was wrong.
 
-## Why the AI made the mistake
+### Why the AI made the mistake
 
 Pick the cause that fits: missing context, wrong assumption, outdated knowledge, or tool misuse. Explain it.
 
-## Why it is problematic
+### Why it is problematic
 
 Real-world impact, for example drainable funds, stuck tokens, wrong prices or a broken process.
 
-## How we fixed it
+### How we fixed it
 
 Code change, manual adjustment, or prompt/spec update. Link the commit or PR.
 
-## Evidence the fix works
+### Evidence the fix works
 
 Real output only. Paste or link each item that applies.
 
