@@ -71,7 +71,7 @@ The bot requires contract build artifacts and deployment-specific configuration.
 
 ## Usage
 
-Connect a wallet on Base Sepolia to buy or sell shares and redeem eligible payouts on a market page. An admin wallet can create markets and trigger creator withdrawals. Chainlink markets require feed configuration; optimistic markets use bonded proposals and may be disputed. A custom arbitrator must call the market's `resolve` function directly or through its own contract logic.
+Connect a wallet on Base Sepolia to buy or sell shares and redeem eligible payouts on a market page. To buy shares, seed a market, or post a bond, first [fund the relevant wallet with test collateral](web/README.md#fund-a-test-wallet). An admin wallet can create markets and trigger creator withdrawals. Chainlink markets require feed configuration; optimistic markets use bonded proposals and may be disputed. A custom arbitrator must call the market's `resolve` function directly or through its own contract logic.
 
 See the [frontend guide](web/README.md) for wallet configuration and workflows, and the resolver guides below for resolution procedures and limitations.
 
