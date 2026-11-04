@@ -8,7 +8,7 @@ Entries 1 to 7 were back-filled on 2026-11-04 (task P0-2) from:
 - the Claude Code session transcripts (the source of the quoted prompts)
 - git history in this repo
 
-Times are local time (UTC+8) unless marked UTC. The tool was Claude Code with a Claude Opus model in every session.
+Times are local time (UTC+8) unless marked UTC. The tool was Claude Code. Session transcripts show both Claude Opus and Claude Sonnet models; the Session 6 orchestrator rounds ran almost entirely on Sonnet (see `docs/ai-audit-report.md`, issue 13).
 
 | # | Title | Type | Status |
 |---|---|---|---|
