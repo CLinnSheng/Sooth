@@ -39,8 +39,10 @@ jobs:
       - name: Check formatting
         run: forge fmt --check
 
-      - name: Build
-        run: forge build --sizes
+      # Size limits (EIP-170) apply to deployable contracts only; test handlers may be larger.
+      # forge test below still compiles and runs every test.
+      - name: Build and check contract sizes
+        run: forge build --sizes --skip './test/**' --skip './script/**'
 
       - name: Test
         run: forge test -vvv
