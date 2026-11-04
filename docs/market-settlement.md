@@ -2,7 +2,7 @@
 
 Each market closes trading at its configured `closeTime`. Its arbitrator can resolve it during the following seven-day resolution window. If it remains unresolved at the deadline, the market is cancelled and settles using the cancellation payout.
 
-## Lifecycle and resolution
+## Market lifecycle
 
 | Time or event | Market state | Behavior |
 |---|---|---|
@@ -11,37 +11,29 @@ Each market closes trading at its configured `closeTime`. Its arbitrator can res
 | A valid resolution | `Resolved` | The winning outcome is stored, including after the deadline. |
 | At or after `closeTime + 7 days`, if unresolved | `Cancelled` | The market uses the cancellation payout. |
 
-`Closed` and `Cancelled` are derived from the block timestamp; neither transition requires a transaction. A successful `resolve` stores `Resolved` and the winning outcome. Only the arbitrator can resolve, and it cannot resolve before close, at or after the deadline, or a second time.
+Closing and cancellation are determined by time and require no transaction. Only the arbitrator can resolve a closed market, and it must do so before the deadline. A resolved market remains resolved after the deadline.
 
-The `IMarket.State` enum also contains `Proposed`, but `Market` does not enter that state. Optimistic proposal and dispute statuses are tracked separately by the optimistic resolver.
+Resolver requests are tracked separately: an optimistic market remains closed while a proposal or dispute is pending. See the [Chainlink resolver](chainlink-resolver.md) and [optimistic resolver](optimistic-resolver.md) for their resolution rules.
 
-## Holder redemption
+## Payouts
 
-After resolution or cancellation, a holder calls `redeem()` to burn their YES and NO balances and receive collateral. Amounts below are in raw six-decimal units:
+After resolution or cancellation, holders can redeem their shares for collateral. Amounts below are in raw six-decimal units:
 
 | Settlement | Payout |
 |---|---|
 | `Resolved` | One raw collateral unit per raw unit of the winning outcome; losing shares pay zero. |
 | `Cancelled` | `floor((yesBalance + noBalance) / 2)` raw collateral units. |
 
-The cancellation calculation combines both balances before rounding down. Cancellation is a half-unit payout per share, not a refund of the holder's original trade cost.
+Cancellation combines both balances before rounding down. It pays half a collateral unit per share, rather than refunding the holder's original trade cost. Rounding down can leave raw-unit dust in the market.
 
-`redeem()` reverts before settlement or when the calculated payout is zero. When a holder has both winning and losing shares, a successful redemption burns both balances; a holder with only losing shares cannot redeem them for collateral. Redemptions are separate transactions for each holder.
+Redemption requires a transaction and burns the holder's YES and NO balances together. It reverts if the payout is zero, including when a holder has only losing shares.
 
-## Creator liquidity and fees
+The market creator receives the settlement value of the pool's shares after resolution or cancellation. Anyone can trigger this liquidity withdrawal once, but the payout always goes to the creator. The pool shares are burned while the recorded reserves remain unchanged, keeping the final spot prices readable.
 
-After resolution or cancellation, anyone can call `withdrawLiquidity()` once. It burns the market's recorded pool shares and pays their settlement value to the market's `creator`, using the same payout calculation as holder redemption. The recorded reserves remain unchanged after withdrawal so the market's final spot prices remain readable.
+Trading fees also belong to the creator and can be withdrawn by anyone on the creator's behalf at or after close, separately from liquidity. See the [trading engine](trading-engine.md) for fee accounting.
 
-Fee withdrawal is separate from liquidity withdrawal. At or after `closeTime`, anyone can call `withdrawFees()` to send all accrued trading fees to the creator. It reverts if no fees are available. Fees and their rounding are described in the [trading engine](trading-engine.md).
+## References
 
-## Limitations and related documentation
-
-The automatic time-based state changes do not send collateral: redemption and withdrawal each require a transaction. Successful transfers depend on the configured collateral token's behavior. Cancellation payouts round down per redemption or liquidity-withdrawal call, which can leave raw-unit dust in the market. Unsolicited collateral and outcome-token transfers are not added to recorded reserves or fees.
-
-For the arbitrators' configuration and settlement rules, see the [Chainlink resolver](chainlink-resolver.md) and [optimistic resolver](optimistic-resolver.md) guides. For creation and collateral assumptions, see [market creation and outcome tokens](market-creation-explained.md).
-
-Run the lifecycle and payout tests from `contracts/`:
-
-```sh
-forge test --match-contract MarketResolutionTest
-```
+- [Market contract](../contracts/src/Market.sol) and [interface](../contracts/src/interfaces/IMarket.sol): state transitions and payout calculations.
+- [Resolution tests](../contracts/test/MarketResolution.t.sol): lifecycle, redemption, and liquidity withdrawal.
+- [Market creation and outcome tokens](market-creation-explained.md): collateral assumptions and market configuration.
