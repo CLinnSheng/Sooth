@@ -59,10 +59,11 @@ FACTORY="$FACTORY" forge script script/DeployOptimisticResolver.s.sol \
   --rpc-url "$RPC_URL" --account "$ACCOUNT" --sender "$SENDER" --broadcast
 ```
 
-Create a market using a factory admin wallet. This example selects the optimistic resolver by setting `ARBITRATOR`:
+Create a market using a factory admin wallet. This example selects the optimistic resolver by setting `ARBITRATOR` and clears `FEED` so an inherited value cannot select Chainlink mode:
 
 ```sh
 FACTORY="$FACTORY" ARBITRATOR="$RESOLVER" CLOSE_TIME="$CLOSE_TIME" \
+FEED=0x0000000000000000000000000000000000000000 \
 SPEC="$(cat spec.json)" \
 forge script script/CreateMarket.s.sol \
   --rpc-url "$RPC_URL" --account "$ACCOUNT" --sender "$SENDER" --broadcast
