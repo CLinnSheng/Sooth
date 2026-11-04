@@ -12,6 +12,9 @@ export const OUTCOME_TOKEN: Address = '0xA2D1e9A1e195d01B1aC21090962B7F2AD76BDB5
 export const OPTIMISTIC_RESOLVER: Address = '0xe37DB6692De70F5fe69fcABb64b7C737fA096335'
 // Price-feed resolver: settles on the Chainlink round live at close; anyone can trigger it.
 export const CHAINLINK_RESOLVER: Address = '0xAD3F05e6eFFeCD81278894266f5816691E704638'
+// Holder-to-holder order book. Zero until DeployOrderBook.s.sol runs and its address is filled in here;
+// while zero the market page hides the order-book panel.
+export const ORDER_BOOK: Address = '0x0000000000000000000000000000000000000000'
 
 export const factoryAbi = parseAbi([
   'function marketCount() view returns (uint256)',
@@ -119,6 +122,38 @@ export const chainlinkResolverAbi = parseAbi([
   'error OwnableUnauthorizedAccount(address account)',
   // Bubbled up from Market.resolve when someone resolved first.
   'error CannotResolve(uint8 currentState)',
+])
+
+// Outcome: 0 = Yes, 1 = No. Prices are mUSDC units (6 decimals) per whole share, strictly between 0 and
+// PRICE_SCALE (1e6); a buyer pays ceil(fill * price / 1e6) per listing. list and buy only while Open.
+export const orderBookAbi = parseAbi([
+  'struct Listing { address seller; address market; uint8 outcome; uint256 price; uint256 remaining; uint256 prev; uint256 next; }',
+  'function list(address market, uint8 outcome, uint256 amount, uint256 price) returns (uint256 listingId)',
+  'function buy(address market, uint8 outcome, uint256 shares, uint256 maxPrice, uint256 maxListings) returns (uint256 sharesBought, uint256 cost)',
+  'function cancel(uint256 listingId) returns (uint256 returned)',
+  'function quoteBuy(address market, uint8 outcome, uint256 shares, uint256 maxPrice, uint256 maxListings) view returns (uint256 sharesBought, uint256 cost)',
+  'function bestPrice(address market, uint8 outcome) view returns (uint256)',
+  'function listingsOf(address market, uint8 outcome, uint256 startAfter, uint256 count) view returns (uint256[] ids)',
+  'function getListing(uint256 listingId) view returns (Listing)',
+  'function PRICE_SCALE() view returns (uint256)',
+  'function factory() view returns (address)',
+  'function outcomeToken() view returns (address)',
+  'function listingCount() view returns (uint256)',
+  'event Listed(uint256 indexed listingId, address indexed market, address indexed seller, uint8 outcome, uint256 amount, uint256 price)',
+  'event Filled(uint256 indexed listingId, address indexed market, address indexed buyer, address seller, uint8 outcome, uint256 shares, uint256 cost)',
+  'event Cancelled(uint256 indexed listingId, address indexed market, address indexed seller, uint256 returned)',
+  'error NotFactoryMarket(address market)',
+  'error MarketNotOpen(uint8 currentState)',
+  'error ZeroAmount()',
+  'error InvalidPrice(uint256 price)',
+  'error NotSeller(address caller)',
+  'error ListingNotFound(uint256 listingId)',
+  'error NothingFilled()',
+  // Bubbled up from the share and mUSDC transfers, so a short balance or allowance reads as such.
+  'error ERC1155InsufficientBalance(address sender, uint256 balance, uint256 needed, uint256 tokenId)',
+  'error ERC1155MissingApprovalForAll(address operator, address owner)',
+  'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
+  'error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)',
 ])
 
 // The subset of AggregatorV3Interface the page reads: feed name and scale, and round lookups for resolve.
