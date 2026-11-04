@@ -1,92 +1,32 @@
 # Chainlink resolver
 
-`ChainlinkResolver` resolves price markets using a configured Chainlink feed. A market uses it by setting the resolver as its arbitrator. After the market closes, anyone can submit the round used for settlement; the contract validates the round and calls the market's `resolve` function.
+`ChainlinkResolver` settles price markets by comparing a Chainlink feed value with a fixed threshold. A market selects it as its arbitrator. Unlike the [optimistic resolver](optimistic-resolver.md), it has no proposal, bond, or dispute process.
 
-## When to use
+## Resolution
 
-Use this resolver when the question can be decided by comparing a supported feed's price at market close with a fixed threshold. For example: “Was ETH/USD below $2,000 at close?” The feed and comparison determine the outcome; there is no proposal, bond, dispute, or judge.
+After close, anyone can submit a feed round to resolve the market. The resolver checks that the round was the latest at or before `closeTime`, has a positive price, and is no older than the configured maximum staleness. It compares that price with the threshold and resolves the market before its resolution deadline.
 
-For a question that requires evidence or interpretation outside a price feed, see the [optimistic resolver](optimistic-resolver.md), which uses bonded proposals and a judge for disputes.
+For a `Below` comparison, YES wins when the price is strictly below the threshold; for `Above`, YES wins when it is strictly above. Equality resolves NO in both cases. The threshold uses the feed's decimals: for an eight-decimal feed, `200000000000` represents 2,000.
+
+For example, a market can ask whether the last ETH/USD value published at or before close was below $2,000. The outcome depends on that on-chain observation, not necessarily the market price at the exact closing time.
 
 ## Configuration
 
-The resolver owner configures each market once, strictly before `closeTime`. The market must name this resolver as its arbitrator. Configuration contains a nonzero feed address, a threshold in the feed's decimals, a comparison (`Below` or `Above`), and a nonzero `maxStaleness` in seconds. The resolver does not verify that the chosen feed, threshold, or market spec describe the intended question.
+The resolver owner configures each market once, before it closes, with a nonzero feed, threshold, comparison, and nonzero maximum staleness. The market must name the resolver as its arbitrator. The resolver does not verify that this configuration matches the market's written question.
 
-The frontend's admin form offers the configured Base Sepolia ETH/USD feed and a one-hour maximum staleness. It creates the market and then requests a separate feed-configuration transaction. The creating wallet must have the factory's `DEFAULT_ADMIN_ROLE`; the configuring wallet must also own the resolver. If configuration fails or is rejected, the market can already exist without a configured feed. The form offers a retry while its unconfigured-market state is available; configuration must still succeed before close.
+Market creation and feed configuration are separate transactions. The creating wallet must be a factory admin, and the configuring wallet must own the resolver. If configuration fails after creation, the owner must configure the market before close; otherwise it cannot resolve through this resolver and will eventually cancel. The [frontend guide](../web/README.md) describes its creation and retry workflow.
 
-`CreateMarket.s.sol` can also create and configure a Chainlink market in one script run. Its broadcaster must be both a factory admin and the resolver owner. Approval, creation, and configuration are separate broadcast transactions, so configuration can fail after the market has been created. If that happens, check `configOf(market)`: a zero feed address means the resolver owner must configure the market before close. Once the market closes, it cannot be configured and remains unresolved until cancellation.
+## Design decisions and limitations
 
-## How settlement works
+Chainlink feeds update according to their own heartbeat and deviation settings, and updates can be delayed. A round that fails the validity or staleness checks cannot settle the market. Failed feed reads also revert resolution rather than being treated as proof that no newer round exists. If the market remains unresolved through its deadline, it cancels; see [market settlement and payouts](market-settlement.md).
 
-1. Before close, the resolver owner configures the feed, threshold, comparison, and maximum staleness.
-2. After close, anyone can submit a feed round to `resolve` before the market's resolution deadline.
-3. The contract checks that the round is valid for the closing time, compares its price with the threshold, and resolves YES or NO. There is no challenge window.
-4. If the market remains unresolved at its deadline, it is cancelled. See [market settlement and payouts](market-settlement.md).
+The resolver has no L2 sequencer uptime check. Price staleness does not substitute for checking sequencer health or a recovery grace period; consider [Chainlink's sequencer guidance](https://docs.chain.link/data-feeds/l2-sequencer-feeds) when deploying on an L2.
 
-### Price selection and outcome
+The [bot](../bot/README.md), frontend, and resolution script search only the feed's current phase. If the market closed in an earlier phase, an appropriate round can be supplied manually to the script using `ROUND_ID`. The contract can validate an earlier-phase round when the feed supports the required next-round reads.
 
-The submitted `roundId` must identify the feed round live at `closeTime`. The resolver checks that:
+## References
 
-- The round exists, has a positive answer, and has `updatedAt <= closeTime`.
-- `closeTime - updatedAt <= maxStaleness`.
-- The round is the latest round, or its next round was updated after close. The next round is `roundId + 1` within a phase, or the first round of the next phase when the current phase has ended.
-
-For `Below`, YES wins if the answer is strictly less than the threshold. For `Above`, YES wins if it is strictly greater. A tie resolves NO in either case. For example, a threshold of `200000000000` represents `2000` for a feed with eight decimals; use the selected feed's actual decimals.
-
-The resolver does not catch errors from feed reads. This prevents a failed next-round read, including an out-of-gas failure, from being treated as proof that no later round exists. A failed check or feed read reverts the resolution transaction. The market itself permits resolution only while closed and before its deadline; an unresolved market cancels at `closeTime + 7 days`. See [market settlement and payouts](market-settlement.md).
-
-Example spec wording:
-
-> YES if the last Chainlink ETH/USD value published at or before 2026-11-30 00:00:00 UTC is below 2000.00000000. Equal resolves NO.
-
-## Clients and automation
-
-- The bot attempts to resolve configured, closed Chainlink markets during its polls. A failed feed read, stale round, transaction, or unavailable bot can delay or prevent resolution; a one-poll result is not guaranteed. See the [bot guide](../bot/README.md).
-- The market page offers a Resolve action for a configured, closed market and displays the feed condition and settled price.
-- Anyone can run `script/ResolveChainlinkMarket.s.sol` with `RESOLVER` and `MARKET`. Set `ROUND_ID` to supply a round directly instead of searching.
-
-The bot, frontend, and script search the feed's current phase only. If the market closed before that phase, find the appropriate round and pass it as `ROUND_ID` to the script. The contract can validate the last round of an earlier phase when the feed's next-round reads support it.
-
-## Limitations
-
-- Chainlink feeds update on heartbeat or deviation conditions; their settings vary by feed and network, and network conditions can delay updates. The settlement answer is an on-chain feed value at or before close, not necessarily the contemporaneous market price. Check the chosen feed's parameters in the [Chainlink feed catalog](https://docs.chain.link/data-feeds/price-feeds/addresses).
-- The resolver checks age relative to the market's close, but has no L2 sequencer uptime check. Staleness is not a substitute for sequencer health or a recovery grace period. Evaluate [Chainlink's L2 sequencer guidance](https://docs.chain.link/data-feeds/l2-sequencer-feeds) before deploying on an L2.
-- `maxStaleness` is fixed when the market is configured. If no valid round meets the checks before the resolution deadline, the market remains unresolved and then cancels.
-
-## Deployment and operation
-
-Run these Foundry commands from `contracts/`. They use a keystore named `deployer`; `SENDER` must be the address of that keystore. Set `RPC_URL`, `SENDER`, `FACTORY`, `RESOLVER`, `CLOSE_TIME`, and, for resolution, `MARKET` to values for your deployment. `CLOSE_TIME` is a future Unix timestamp, and `spec.json` must contain the intended market spec.
-
-Deploy the resolver. Its owner defaults to the broadcasting wallet; set `ADMIN` in the environment to use another owner.
-
-```sh
-forge script script/DeployChainlinkResolver.s.sol \
-  --rpc-url "$RPC_URL" --account deployer --sender "$SENDER" --broadcast
-```
-
-Create and configure a market using a wallet that is both a factory admin and the resolver owner. `LIQUIDITY` defaults to `100e6` raw collateral units; `MAX_STALENESS` defaults to `3600` seconds.
-
-```sh
-FACTORY="$FACTORY" RESOLVER="$RESOLVER" CLOSE_TIME="$CLOSE_TIME" \
-FEED=0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1 \
-THRESHOLD=200000000000 COMPARISON=below MAX_STALENESS=3600 \
-SPEC="$(cat spec.json)" \
-forge script script/CreateMarket.s.sol \
-  --rpc-url "$RPC_URL" --account deployer --sender "$SENDER" --broadcast
-```
-
-The example feed is the address offered by the frontend on Base Sepolia. Verify the feed and signer configuration for the target deployment. The inline assignments pass the factory, resolver, close time, and feed settings to the script even if the corresponding shell variables have not been exported.
-
-After the market closes, any funded signer can run the resolution script. Set `ROUND_ID` in the environment to use a specific round instead of the automatic search.
-
-```sh
-RESOLVER="$RESOLVER" MARKET="$MARKET" \
-forge script script/ResolveChainlinkMarket.s.sol \
-  --rpc-url "$RPC_URL" --account deployer --sender "$SENDER" --broadcast
-```
-
-For contract checks, run:
-
-```sh
-forge test --match-contract ChainlinkResolverTest
-```
+- [Resolver contract](../contracts/src/ChainlinkResolver.sol) and [interface](../contracts/src/interfaces/IChainlinkResolver.sol): configuration and round validation.
+- [Resolver tests](../contracts/test/ChainlinkResolver.t.sol): comparisons, round selection, and resolution constraints.
+- [Deployment](../contracts/script/DeployChainlinkResolver.s.sol), [market creation](../contracts/script/CreateMarket.s.sol), and [resolution](../contracts/script/ResolveChainlinkMarket.s.sol) scripts: configuration and operation.
+- [Chainlink feed catalog](https://docs.chain.link/data-feeds/price-feeds/addresses): feeds and their network-specific settings.
