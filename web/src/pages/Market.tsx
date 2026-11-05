@@ -25,6 +25,7 @@ import {
   shortAddr,
   signed,
   usdc,
+  walletShares,
   type Outcome,
 } from '../mock'
 
@@ -52,10 +53,12 @@ export default function Market() {
 
   const p = priceYes(market)
   const mine = positions.filter((pos) => pos.marketId === market.id)
-  const payout = mine.reduce((sum, pos) => sum + positionValue(pos, market), 0)
+  // redeem() only pays wallet shares; listed ones come back by cancelling the listing first.
+  const payout = mine.reduce((sum, pos) => sum + positionValue({ ...pos, shares: walletShares(pos) }, market), 0)
   const canWithdrawLiquidity =
     isSettled(market) && !market.liquidityWithdrawn && address?.toLowerCase() === market.creator.toLowerCase()
-  const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
+  // Completed trades only: order-book List and Cancel rows show in the seller's portfolio history.
+  const activity = data.trades.filter((t) => t.marketId === market.id && (t.side === 'Buy' || t.side === 'Sell')).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
   // The last history point is stamped when markets load, so the page and chart share one clock.
   const now = market.history.at(-1)!.at
@@ -129,7 +132,11 @@ export default function Market() {
               const pnl = value - pos.shares * pos.avgPrice
               return (
                 <div key={pos.outcome} className="grid grid-cols-2 gap-y-1 text-sm sm:grid-cols-4">
-                  <div><p className="text-xs text-muted">Shares</p>{pos.shares} {pos.outcome}</div>
+                  <div>
+                    <p className="text-xs text-muted">Shares</p>
+                    {pos.shares} {pos.outcome}
+                    {pos.listed ? <span className="ml-1 text-xs text-muted">({usdc(pos.listed)} listed)</span> : null}
+                  </div>
                   <div><p className="text-xs text-muted">Avg / now</p>{cents(pos.avgPrice)} / {cents(priceOf(market, pos.outcome))}</div>
                   <div><p className="text-xs text-muted">Value</p>{usdc(value)} USDC</div>
                   <div>

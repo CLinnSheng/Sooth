@@ -7,7 +7,7 @@ import { useAccount, useReadContract } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { ClaimButton, PAGE_SIZE, ShowMore } from '../components'
 import { USDC } from '../contracts'
-import { ago, basescanAddr, cents, isSettled, positionValue, priceOf, shortAddr, signed, usdc } from '../mock'
+import { ago, basescanAddr, cents, isSettled, positionValue, priceOf, shortAddr, signed, usdc, walletShares } from '../mock'
 
 // /portfolio is the connected wallet; /portfolio/:address is anyone's, read-only from public chain data.
 export default function Portfolio() {
@@ -65,7 +65,9 @@ export default function Portfolio() {
   const redeemed = data.redemptions.filter((r) => isOwner(r.holder)).reduce((s, r) => s + r.payout, 0)
   const pnl = soldFor + redeemed + total - paidIn
   // redeem() pays both sides at once, so each row's button shows its market's total.
-  const payout = (marketId: number) => rows.filter((r) => r.m.id === marketId).reduce((s, r) => s + r.value, 0)
+  // Listed shares are excluded: they must be cancelled from the order book before redeem() can pay them.
+  const payout = (marketId: number) =>
+    rows.filter((r) => r.m.id === marketId).reduce((s, r) => s + positionValue({ ...r.p, shares: walletShares(r.p) }, r.m), 0)
   const history = data.trades.filter((t) => t.trader.toLowerCase() === owner.toLowerCase()).toReversed()
   const cash = isOwn ? wallet?.usdc : viewedCash === undefined ? null : Number(formatUnits(viewedCash, 6))
 
@@ -133,7 +135,10 @@ export default function Portfolio() {
                 <tr key={`${p.marketId}-${p.outcome}`}>
                   <td className="max-w-xs p-4"><Link to={`/market/${m.id}`} className="hover:underline">{m.question}</Link></td>
                   <td className={`p-4 ${p.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{p.outcome}</td>
-                  <td className="p-4 text-right">{usdc(p.shares)}</td>
+                  <td className="p-4 text-right">
+                    {usdc(p.shares)}
+                    {p.listed ? <span className="block text-xs text-muted">{usdc(p.listed)} listed</span> : null}
+                  </td>
                   <td className="p-4 text-right">{cents(p.avgPrice)}</td>
                   <td className="p-4 text-right">
                     {m.status === 'resolved' ? (

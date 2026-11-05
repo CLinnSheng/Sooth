@@ -73,7 +73,9 @@ const soothEvents = [
   getAbiItem({ abi: optimisticResolverAbi, name: 'Ruled' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Refunded' }),
   getAbiItem({ abi: chainlinkResolverAbi, name: 'PriceResolved' }),
+  getAbiItem({ abi: orderBookAbi, name: 'Listed' }),
   getAbiItem({ abi: orderBookAbi, name: 'Filled' }),
+  getAbiItem({ abi: orderBookAbi, name: 'Cancelled' }),
 ]
 
 type Spec = Pick<Market, 'question' | 'category' | 'rules' | 'source'>
@@ -84,8 +86,10 @@ type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
 type PriceLog = Extract<SoothLog, { eventName: 'PriceResolved' }>
 type PayoutLog = Extract<SoothLog, { eventName: 'FeesWithdrawn' | 'LiquidityWithdrawn' }>
 type RedeemLog = Extract<SoothLog, { eventName: 'Redeemed' }>
-type FillLog = Extract<SoothLog, { eventName: 'Filled' }>
-type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog | RedeemLog | FillLog>
+type BookLog = Extract<SoothLog, { eventName: 'Listed' | 'Filled' | 'Cancelled' }>
+type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog | RedeemLog | BookLog>
+// An order-book listing, rebuilt from its Listed, Filled and Cancelled events.
+type OpenListing = { marketId: number; outcome: Outcome; seller: string; price: number; remaining: number }
 // Everything the scan found for one market, besides its MarketCreated.
 type MarketLogs = { trades: TradeLog[]; request: ResolverLog[]; price?: PriceLog; payouts: PayoutLog[] }
 
@@ -130,19 +134,24 @@ export function usePositions(owner: Address | undefined): Position[] {
     query: { enabled: Boolean(owner && keys.length) },
   })
   if (!data || !balances || !owner) return []
+  const listedOf = (key: { marketId: number; outcome: Outcome }) =>
+    data.listings
+      .filter((l) => l.marketId === key.marketId && l.outcome === key.outcome && l.seller.toLowerCase() === owner.toLowerCase())
+      .reduce((sum, l) => sum + l.remaining, 0)
   return keys.flatMap((key, i) => {
-    if (balances[i] === 0n) return []
+    const listed = listedOf(key)
+    if (balances[i] === 0n && listed === 0) return []
     const buys = data.trades.filter(
       (t) => t.marketId === key.marketId && t.outcome === key.outcome && t.side === 'Buy' && t.trader.toLowerCase() === owner.toLowerCase(),
     )
     const cost = buys.reduce((sum, t) => sum + t.amount, 0)
     const bought = buys.reduce((sum, t) => sum + t.shares, 0)
     // Average cost over every buy; sells don't move it, so PnL is the gain on what's still held.
-    return [{ ...key, shares: toUnits(balances[i]), avgPrice: bought > 0 ? cost / bought : 0 }]
+    return [{ ...key, shares: toUnits(balances[i]) + listed, listed, avgPrice: bought > 0 ? cost / bought : 0 }]
   })
 }
 
-async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; redemptions: Redemption[] }> {
+async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; redemptions: Redemption[]; listings: OpenListing[] }> {
   // Pin every read to one block, so state and logs describe the same moment.
   const blockNumber = await client.getBlockNumber()
   const count = await client.readContract({ address: FACTORY, abi: factoryAbi, functionName: 'marketCount', blockNumber })
@@ -165,16 +174,17 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
   const priceLogs: PriceLog[] = []
   const payoutLogs: PayoutLog[] = []
   const redeemLogs: RedeemLog[] = []
-  // AMM trades and order-book fills, in the order the chain emitted them.
+  // AMM trades and order-book activity, in the order the chain emitted them.
   const trades: Trade[] = []
+  const listings = new Map<bigint, OpenListing>()
   for (const log of scan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
     else if (log.eventName === 'Bought' || log.eventName === 'Sold') {
       tradeLogs.push(log)
       trades.push(toTrade(log, idByAddress.get(log.address.toLowerCase())!))
-    } else if (log.eventName === 'Filled') {
+    } else if (log.eventName === 'Listed' || log.eventName === 'Filled' || log.eventName === 'Cancelled') {
       const marketId = idByAddress.get(log.args.market.toLowerCase())
-      if (marketId !== undefined) trades.push(...toFillTrades(log, marketId))
+      if (marketId !== undefined) trades.push(...toBookTrades(log, marketId, listings))
     }
     else if (log.eventName === 'PriceResolved') priceLogs.push(log)
     else if (log.eventName === 'FeesWithdrawn' || log.eventName === 'LiquidityWithdrawn') payoutLogs.push(log)
@@ -202,7 +212,7 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
     holder: log.args.holder,
     payout: toUnits(log.args.payout),
   }))
-  return { markets, trades, redemptions }
+  return { markets, trades, redemptions, listings: [...listings.values()].filter((l) => l.remaining > 0) }
 }
 
 async function readMarket(address: Address, blockNumber: bigint) {
@@ -354,16 +364,36 @@ function replayRequest(logs: ResolverLog[]): ResolutionRequest | undefined {
   return request
 }
 
-// One order-book fill is a buy for the buyer and a sell for the seller, both at the listing's price.
-// Kept out of MarketLogs.trades, so the AMM price chart and volume only reflect pool trades.
-function toFillTrades(log: FillLog, marketId: number): Trade[] {
-  const outcome = log.args.outcome === OUTCOME_YES ? 'YES' : 'NO'
+// Order-book events as history rows, keeping each listing's remaining shares up to date.
+// A fill is a Buy for the buyer and a Sell for the seller at the listing's price; List and Cancel rows only
+// appear in the seller's history. Kept out of MarketLogs.trades, so the AMM chart and volume stay pool-only.
+function toBookTrades(log: BookLog, marketId: number, listings: Map<bigint, OpenListing>): Trade[] {
   const at = new Date(blockTimes.get(log.blockNumber)! * 1000).toISOString()
-  const base = { marketId, outcome, at, tx: log.transactionHash, venue: 'book', amount: toUnits(log.args.cost), shares: toUnits(log.args.shares) } as const
-  return [
-    { ...base, trader: log.args.buyer, side: 'Buy' },
-    { ...base, trader: log.args.seller, side: 'Sell' },
-  ]
+  const base = { marketId, at, tx: log.transactionHash, venue: 'book' } as const
+  const id = log.args.listingId
+  if (log.eventName === 'Listed') {
+    const outcome = log.args.outcome === OUTCOME_YES ? 'YES' : 'NO'
+    const shares = toUnits(log.args.amount)
+    const price = toUnits(log.args.price)
+    listings.set(id, { marketId, outcome, seller: log.args.seller, price, remaining: shares })
+    return [{ ...base, outcome, trader: log.args.seller, side: 'List', shares, amount: shares * price }]
+  }
+  const listing = listings.get(id)
+  if (log.eventName === 'Filled') {
+    const outcome = log.args.outcome === OUTCOME_YES ? 'YES' : 'NO'
+    const shares = toUnits(log.args.shares)
+    if (listing) listing.remaining -= shares
+    const fill = { ...base, outcome, shares, amount: toUnits(log.args.cost) } as const
+    return [
+      { ...fill, trader: log.args.buyer, side: 'Buy' },
+      { ...fill, trader: log.args.seller, side: 'Sell' },
+    ]
+  }
+  // Cancelled carries no outcome or price; both come from the listing's Listed event.
+  if (!listing) return []
+  listing.remaining = 0
+  const shares = toUnits(log.args.returned)
+  return [{ ...base, outcome: listing.outcome, trader: log.args.seller, side: 'Cancel', shares, amount: shares * listing.price }]
 }
 
 function toTrade(log: TradeLog, marketId: number): Trade {
