@@ -184,12 +184,15 @@ export default function Market() {
                 // Fixed grid columns and tabular digits keep every row's numbers lined up.
                 <li
                   key={`${t.tx}-${i}`}
-                  className="grid grid-cols-[6.5rem_4.5rem_1fr_4.5rem_1rem] items-center gap-3 whitespace-nowrap py-2 tabular-nums sm:grid-cols-[6.5rem_4.5rem_4.5rem_3.5rem_1fr_4.5rem_1rem]"
+                  className="grid grid-cols-[6.5rem_6.5rem_1fr_4.5rem_1rem] items-center gap-3 whitespace-nowrap py-2 tabular-nums sm:grid-cols-[6.5rem_6.5rem_4.5rem_3.5rem_1fr_4.5rem_1rem]"
                 >
                   <Link to={`/portfolio/${t.trader}`} className="text-muted hover:text-white hover:underline">
                     {shortAddr(t.trader)}
                   </Link>
-                  <span className={t.outcome === 'YES' ? 'text-yes' : 'text-no'}>{t.side} {t.outcome}</span>
+                  <span className={t.outcome === 'YES' ? 'text-yes' : 'text-no'}>
+                    {t.side} {t.outcome}
+                    {t.venue === 'book' && <span className="ml-1 text-xs text-muted" title="Traded with another user on the order book">book</span>}
+                  </span>
                   <span className="hidden text-right text-muted sm:block">{usdc(t.shares)}</span>
                   <span className="hidden text-muted sm:block">@ {cents(t.amount / t.shares)}</span>
                   <span className="text-right">{usdc(t.amount)} USDC</span>

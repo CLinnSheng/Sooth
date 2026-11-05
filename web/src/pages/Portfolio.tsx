@@ -172,7 +172,10 @@ export default function Portfolio() {
               {history.slice(0, historyShown).map((t, i) => (
                 <tr key={`${t.tx}-${i}`}>
                   <td className="p-4 text-muted" title={new Date(t.at).toLocaleString()}>{ago(t.at)}</td>
-                  <td className={`p-4 ${t.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{t.side} {t.outcome}</td>
+                  <td className={`p-4 ${t.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>
+                    {t.side} {t.outcome}
+                    {t.venue === 'book' && <span className="ml-1 text-xs text-muted" title="Traded with another user on the order book">book</span>}
+                  </td>
                   <td className="max-w-xs p-4"><Link to={`/market/${t.marketId}`} className="hover:underline">{marketById(t.marketId).question}</Link></td>
                   <td className="p-4 text-right">{usdc(t.shares)} @ {cents(t.amount / t.shares)}</td>
                   <td className="p-4 text-right">{usdc(t.amount)} USDC</td>
