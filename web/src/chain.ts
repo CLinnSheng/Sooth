@@ -18,11 +18,13 @@ import {
   DEPLOY_BLOCK,
   FACTORY,
   OPTIMISTIC_RESOLVER,
+  ORDER_BOOK,
   OUTCOME_TOKEN,
   chainlinkResolverAbi,
   factoryAbi,
   marketAbi,
   optimisticResolverAbi,
+  orderBookAbi,
   outcomeTokenAbi,
 } from './contracts'
 import {
@@ -71,6 +73,7 @@ const soothEvents = [
   getAbiItem({ abi: optimisticResolverAbi, name: 'Ruled' }),
   getAbiItem({ abi: optimisticResolverAbi, name: 'Refunded' }),
   getAbiItem({ abi: chainlinkResolverAbi, name: 'PriceResolved' }),
+  getAbiItem({ abi: orderBookAbi, name: 'Filled' }),
 ]
 
 type Spec = Pick<Market, 'question' | 'category' | 'rules' | 'source'>
@@ -81,7 +84,8 @@ type TradeLog = Extract<SoothLog, { eventName: 'Bought' | 'Sold' }>
 type PriceLog = Extract<SoothLog, { eventName: 'PriceResolved' }>
 type PayoutLog = Extract<SoothLog, { eventName: 'FeesWithdrawn' | 'LiquidityWithdrawn' }>
 type RedeemLog = Extract<SoothLog, { eventName: 'Redeemed' }>
-type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog | RedeemLog>
+type FillLog = Extract<SoothLog, { eventName: 'Filled' }>
+type ResolverLog = Exclude<SoothLog, CreatedLog | TradeLog | PriceLog | PayoutLog | RedeemLog | FillLog>
 // Everything the scan found for one market, besides its MarketCreated.
 type MarketLogs = { trades: TradeLog[]; request: ResolverLog[]; price?: PriceLog; payouts: PayoutLog[] }
 
@@ -149,7 +153,8 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
   )
   const [states] = await Promise.all([
     Promise.all(addresses.map((address) => readMarket(address, blockNumber))),
-    extendScan([FACTORY, OPTIMISTIC_RESOLVER, CHAINLINK_RESOLVER, ...addresses], blockNumber),
+    // The order book is scanned only once it is deployed (ORDER_BOOK set in contracts.ts).
+    extendScan([FACTORY, OPTIMISTIC_RESOLVER, CHAINLINK_RESOLVER, ...(ORDER_BOOK === zeroAddress ? [] : [ORDER_BOOK]), ...addresses], blockNumber),
   ])
   await cacheBlockTimes(scan.logs)
 
@@ -160,9 +165,17 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
   const priceLogs: PriceLog[] = []
   const payoutLogs: PayoutLog[] = []
   const redeemLogs: RedeemLog[] = []
+  // AMM trades and order-book fills, in the order the chain emitted them.
+  const trades: Trade[] = []
   for (const log of scan.logs) {
     if (log.eventName === 'MarketCreated') created.set(Number(log.args.marketId), log)
-    else if (log.eventName === 'Bought' || log.eventName === 'Sold') tradeLogs.push(log)
+    else if (log.eventName === 'Bought' || log.eventName === 'Sold') {
+      tradeLogs.push(log)
+      trades.push(toTrade(log, idByAddress.get(log.address.toLowerCase())!))
+    } else if (log.eventName === 'Filled') {
+      const marketId = idByAddress.get(log.args.market.toLowerCase())
+      if (marketId !== undefined) trades.push(...toFillTrades(log, marketId))
+    }
     else if (log.eventName === 'PriceResolved') priceLogs.push(log)
     else if (log.eventName === 'FeesWithdrawn' || log.eventName === 'LiquidityWithdrawn') payoutLogs.push(log)
     else if (log.eventName === 'Redeemed') redeemLogs.push(log)
@@ -184,7 +197,6 @@ async function loadMarkets(): Promise<{ markets: Market[]; trades: Trade[]; rede
     }
     return toMarket(id, state, createdLog, logs, parseSpec(createdLog.args.spec))
   })
-  const trades = tradeLogs.map((log) => toTrade(log, idByAddress.get(log.address.toLowerCase())!))
   const redemptions = redeemLogs.map((log) => ({
     marketId: idByAddress.get(log.address.toLowerCase())!,
     holder: log.args.holder,
@@ -340,6 +352,18 @@ function replayRequest(logs: ResolverLog[]): ResolutionRequest | undefined {
     else request = { ...request, status: 'settled', settledBy: SETTLED_BY[log.eventName] }
   }
   return request
+}
+
+// One order-book fill is a buy for the buyer and a sell for the seller, both at the listing's price.
+// Kept out of MarketLogs.trades, so the AMM price chart and volume only reflect pool trades.
+function toFillTrades(log: FillLog, marketId: number): Trade[] {
+  const outcome = log.args.outcome === OUTCOME_YES ? 'YES' : 'NO'
+  const at = new Date(blockTimes.get(log.blockNumber)! * 1000).toISOString()
+  const base = { marketId, outcome, at, tx: log.transactionHash, venue: 'book', amount: toUnits(log.args.cost), shares: toUnits(log.args.shares) } as const
+  return [
+    { ...base, trader: log.args.buyer, side: 'Buy' },
+    { ...base, trader: log.args.seller, side: 'Sell' },
+  ]
 }
 
 function toTrade(log: TradeLog, marketId: number): Trade {

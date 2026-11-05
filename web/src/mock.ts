@@ -54,6 +54,7 @@ export type Trade = {
   shares: number
   at: string // ISO timestamp
   tx: string
+  venue?: 'amm' | 'book' // order-book fills set 'book'; AMM trades leave it unset
 }
 
 export const FEE = 0.01 // Market.FEE_BPS = 100
