@@ -25,7 +25,6 @@ contract ResolverHandler is HandlerBase {
     mapping(uint256 => uint256) public resolves;
     mapping(uint256 => IMarket.Outcome) public firstOutcome;
     /// @dev Net bond flow of each address on each market's request: + paid to it, - pulled from it.
-    mapping(uint256 => mapping(address => int256)) public bondNet;
     uint256 public donated;
 
     // Violation counters: each must stay 0.
@@ -90,7 +89,6 @@ contract ResolverHandler is HandlerBase {
         try resolver.propose(_markets[i], _outcome(outcomeSeed), EVIDENCE) {
             if (usdc.balanceOf(address(resolver)) != before + bond) ++bondPullMismatches;
             bondsIn[i] += bond;
-            bondNet[i][actor] -= int256(bond);
             ++calls["propose"];
         } catch {}
     }
@@ -104,7 +102,6 @@ contract ResolverHandler is HandlerBase {
         try resolver.dispute(_markets[i], EVIDENCE) {
             if (usdc.balanceOf(address(resolver)) != before + bond) ++bondPullMismatches;
             bondsIn[i] += bond;
-            bondNet[i][actor] -= int256(bond);
             ++calls["dispute"];
         } catch {}
     }
@@ -121,7 +118,6 @@ contract ResolverHandler is HandlerBase {
             if (usdc.balanceOf(r.proposer) != b.proposer + bond) ++bondPayoutMismatches;
             if (usdc.balanceOf(address(resolver)) + bond != b.resolver) ++bondPayoutMismatches;
             bondsOut[i] += bond;
-            bondNet[i][r.proposer] += int256(bond);
             _recordResolve(i, r.outcome);
             ++calls["finalize"];
         } catch {}
@@ -146,7 +142,6 @@ contract ResolverHandler is HandlerBase {
             }
             if (usdc.balanceOf(address(resolver)) + 2 * bond != b.resolver) ++bondPayoutMismatches;
             bondsOut[i] += 2 * bond;
-            bondNet[i][winner] += int256(2 * bond);
             _recordResolve(i, outcome);
             ++calls["rule"];
         } catch {}
@@ -173,10 +168,6 @@ contract ResolverHandler is HandlerBase {
             uint256 out = disputed ? 2 * bond : bond;
             if (usdc.balanceOf(address(resolver)) + out != b.resolver) ++refundMismatches;
             bondsOut[i] += out;
-            bondNet[i][r.proposer] += int256(bond);
-            if (disputed) bondNet[i][r.disputer] += int256(bond);
-            // Nobody gains or loses on a refunded request.
-            if (bondNet[i][r.proposer] != 0 || bondNet[i][r.disputer] != 0) ++refundMismatches;
             ++calls["refund"];
         } catch {}
     }
@@ -200,11 +191,12 @@ contract ResolverHandler is HandlerBase {
     ///      itself is an edge of MarketHandler.warpToEdge.
     function warpToEdge(uint256 marketSeed, uint256 edgeSeed) external synced {
         IMarket market =
-            _markets[_pick(marketSeed, IOptimisticResolver.Status.Proposed, IOptimisticResolver.Status.Proposed)];
+            _markets[_pick(marketSeed, IOptimisticResolver.Status.Proposed, IOptimisticResolver.Status.Disputed)];
         IOptimisticResolver.Request memory r = resolver.requestOf(market);
         uint256 t;
-        if (r.status == IOptimisticResolver.Status.Proposed) {
-            t = r.proposedAt + window - (edgeSeed % 2);
+        if (r.status == IOptimisticResolver.Status.Proposed || r.status == IOptimisticResolver.Status.Disputed) {
+            uint256 e = edgeSeed % 3;
+            t = e == 2 ? market.resolutionDeadline() : r.proposedAt + window - e;
         } else {
             uint256 deadline = market.resolutionDeadline();
             uint256 e = edgeSeed % 4;

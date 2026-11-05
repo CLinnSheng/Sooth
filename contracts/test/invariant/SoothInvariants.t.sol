@@ -454,9 +454,19 @@ contract SoothInvariantsTest is StdInvariant, Test {
         if (vm.getBlockTimestamp() < end) vm.warp(end);
 
         for (uint256 i = EOA_MARKETS; i < MARKETS; ++i) {
-            IOptimisticResolver.Status s = resolver.requestOf(markets[i]).status;
-            if (s == IOptimisticResolver.Status.Proposed || s == IOptimisticResolver.Status.Disputed) {
-                resolver.refund(markets[i]);
+            IOptimisticResolver.Request memory r = resolver.requestOf(markets[i]);
+            if (r.status != IOptimisticResolver.Status.Proposed && r.status != IOptimisticResolver.Status.Disputed) {
+                continue;
+            }
+            bool disputed = r.status == IOptimisticResolver.Status.Disputed;
+            uint256 p0 = usdc.balanceOf(r.proposer);
+            uint256 d0 = usdc.balanceOf(r.disputer);
+            resolver.refund(markets[i]);
+            if (disputed && r.proposer == r.disputer) {
+                assertEq(usdc.balanceOf(r.proposer), p0 + 2 * BOND, "refund: same address gets both bonds");
+            } else {
+                assertEq(usdc.balanceOf(r.proposer), p0 + BOND, "refund: proposer gets one bond");
+                if (disputed) assertEq(usdc.balanceOf(r.disputer), d0 + BOND, "refund: disputer gets one bond");
             }
         }
         assertEq(usdc.balanceOf(address(resolver)), rh.donated(), "no bond left in the resolver");
