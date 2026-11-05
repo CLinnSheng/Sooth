@@ -105,6 +105,8 @@ function OrderBook({ market, outcome, setOutcome }: Props) {
     query: { enabled: Boolean(address && tokenId !== undefined) },
   })
   const [usdcRaw, allowance, isListApproved, heldRaw] = reads ?? [0n, 0n, false, 0n]
+  // Until the wallet reads arrive, the zeros above are placeholders, not real balances.
+  const balancesLoaded = reads !== undefined
 
   const sharesRaw = toUnits(shares)
   const maxPriceRaw = toUnits(maxPrice)
@@ -171,6 +173,7 @@ function OrderBook({ market, outcome, setOutcome }: Props) {
   else if (!validPrice(maxPriceRaw)) buyAction = { label: 'Max price must be between 0 and 1', disabled: true }
   else if (!quote) buyAction = { label: 'Quoting…', disabled: true }
   else if (quotedShares === 0n) buyAction = { label: 'Nothing listed at or below that price', disabled: true }
+  else if (!balancesLoaded) buyAction = { label: 'Loading balances…', disabled: true }
   else if (quotedCost > usdcRaw) buyAction = { label: 'Not enough mUSDC', disabled: true }
   else if (allowance < quotedCost) buyAction = { label: 'Approve mUSDC, then buy', onClick: buy }
   else buyAction = { label: `Buy ${amountText(quotedShares)} ${outcome}`, onClick: buy }
@@ -179,6 +182,7 @@ function OrderBook({ market, outcome, setOutcome }: Props) {
   if (gate()) listAction = gate()!
   else if (listTx.pending) listAction = { label: busy(listTx.pending), disabled: true }
   else if (listAmountRaw <= 0n) listAction = { label: 'Enter an amount', disabled: true }
+  else if (!balancesLoaded) listAction = { label: 'Loading balances…', disabled: true }
   else if (listAmountRaw > heldRaw) listAction = { label: `You hold ${amountText(heldRaw)} ${outcome}`, disabled: true }
   else if (!validPrice(listPriceRaw)) listAction = { label: 'Price must be between 0 and 1', disabled: true }
   else if (!isListApproved) listAction = { label: 'Approve shares, then list', onClick: list }
