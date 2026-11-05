@@ -88,7 +88,7 @@ type MarketLogs = { trades: TradeLog[]; request: ResolverLog[]; price?: PriceLog
 // Outcome shares use the collateral's 6 decimals.
 const toUnits = (raw: bigint) => Number(formatUnits(raw, 6))
 
-// shortcut: logs are scanned in the browser, one getLogs call per 50k blocks since deploy, and logs
+// shortcut: logs are scanned in the browser, one getLogs call per MAX_LOG_RANGE blocks since deploy, and logs
 // from a reorg stay cached until reload. Move to an indexer (Ponder) once first load gets slow.
 const scan: { toBlock: bigint; logs: SoothLog[] } = { toBlock: DEPLOY_BLOCK - 1n, logs: [] }
 const blockTimes = new Map<bigint, number>()
