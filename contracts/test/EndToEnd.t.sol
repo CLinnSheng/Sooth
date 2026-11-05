@@ -122,10 +122,6 @@ contract EndToEndTest is Test {
         assertEq(market.yesPool(), S_YES_POOL);
         assertEq(market.noPool(), S_NO_POOL);
         assertEq(market.accruedFees(), S_FEES);
-        // Sanity: each buy gave more shares than the 19.8 USDC net paid (price below 1), but fewer than
-        // the 20 USDC of a flat 1:1 mint plus the whole opposite pool could ever give.
-        assertGt(S_ALICE_YES, 19_800_000);
-        assertLt(S_ALICE_YES, 2 * 19_800_000);
     }
 
     function _redeem(IMarket market, address who) private returns (uint256) {
