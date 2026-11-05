@@ -417,6 +417,12 @@ contract OutcomeOrderBookTest is Test {
         (uint256 bought,) = _buy(bob, IMarket.Outcome.Yes, 5e6, 500_000, 1);
         assertEq(bought, 5e6);
         assertEq(book.getListing(b).remaining, 10e6);
+
+        // The half-filled head still counts as one listing: with maxListings = 1 the next buy takes only
+        // its 5 left and never reaches carol's listing, even though erin wants 15 and b is cheap enough.
+        (bought,) = _buy(erin, IMarket.Outcome.Yes, 15e6, 500_000, 1);
+        assertEq(bought, 5e6, "stops after the one listing it may touch");
+        assertEq(book.getListing(b).remaining, 10e6, "second listing untouched");
     }
 
     // OB-8 sweep across many listings
