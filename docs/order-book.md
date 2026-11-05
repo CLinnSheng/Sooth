@@ -90,3 +90,30 @@ Bob pays 12 USDC and receives 25 YES. After resolution he redeems through `Marke
 - Depth: page with `listingsOf(market, outcome, lastId, n)` and read each `getListing(id)`. `bestPrice`
   is the best ask. Watch `Listed`, `Filled` and `Cancelled` to refresh.
 - Hide `list`/`buy` when `market.state() != Open`, but always offer `cancel` for the user's open listings.
+
+## Website
+
+The market page has a "Trade with others" panel (`web/src/orderbook.tsx`). It stays hidden until `ORDER_BOOK`
+in `web/src/contracts.ts` is set to the deployed address.
+
+- **Book:** best price and the listings for the chosen outcome, cheapest first; your own listings are marked
+  "yours" and have a Cancel button.
+- **Buy:** shares and a max price give a `quoteBuy` preview (fill, total cost, average price). The panel
+  approves exactly the quoted mUSDC if needed, then calls `buy` with `maxListings` = 20.
+- **List:** amount and price (between 0 and 1). The first listing asks for `setApprovalForAll`, then `list`.
+- **After close:** only "Order-book trading is closed" and your own listings with Cancel.
+- **While balances load,** the buttons say "Loading balances…" rather than treating unknown balances as zero.
+
+History and positions (`web/src/chain.ts`, `Market.tsx`, `Portfolio.tsx`) are rebuilt from the book's events:
+
+| Event | Shown as |
+|---|---|
+| `Filled` | A **Buy** row for the buyer and a **Sell** row for the seller at the listing's price, tagged "book", in the market's Recent activity and both users' portfolio history. Counted in average price and PnL |
+| `Listed` | A **List** row in the seller's portfolio history only |
+| `Cancelled` | A **Cancel** row in the seller's portfolio history only (outcome and price come from the listing) |
+
+- Shares waiting in the book still belong to the seller: positions show them as "N listed" and count them in
+  value and PnL. The redeem amount counts wallet shares only (`walletShares`), because listed shares must be
+  cancelled before `redeem` can pay them.
+- The AMM price chart and volume use pool trades only; order-book trades don't move the pool price.
+- Listing and cancelling don't change PnL: only real buys and sells do.
