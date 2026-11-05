@@ -398,7 +398,7 @@ integration or a manual `wrangler deploy`) is not recorded in the repo. TODO: ev
 
 ### CI (`.github/workflows/ci.yml`)
 
-Runs on pushes and pull requests to `main` and `lin/integration`.
+Runs on pushes and pull requests to `main`, and by hand.
 
 | Job | Steps |
 |---|---|
