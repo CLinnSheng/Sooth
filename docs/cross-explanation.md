@@ -262,7 +262,7 @@ Files: `contracts/test/`, `contracts/test/invariant/`, `docs/testing.md`, `docs/
 `DeployOrderBook` (not run yet). Addresses are copied by hand into `web/src/contracts.ts` and the bot's
 `.env`. Factory `0x8d399B14ea106bA62F79186217DB6fF1F75dc492` on Base Sepolia, block 50040022. CI runs
 format, size and test checks for contracts, and `pytest` for the bot, on pushes and pull requests to
-`main` and `lin/integration`.
+`main`.
 
 | Question | Answer |
 |---|---|

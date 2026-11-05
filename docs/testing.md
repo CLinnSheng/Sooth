@@ -73,7 +73,7 @@ uv run pytest -q tests/test_agent.py   # one file
 
 ### CI (`.github/workflows/ci.yml`)
 
-Runs on pull requests to `main` and `lin/integration`, on pushes to `main` and `lin/integration`, and by hand (`workflow_dispatch`). Read-only permissions, no secrets. A newer push to the same branch cancels the older run.
+Runs on pull requests and pushes to `main`, and by hand (`workflow_dispatch`). Read-only permissions, no secrets. A newer push to the same branch cancels the older run.
 
 | Job | Steps |
 |---|---|
@@ -136,7 +136,7 @@ Counts are from `forge test --summary` and `uv run pytest --collect-only -q` on 
 | P1-2 | `_take` skips `listing.remaining -= fill` | `invariant_OB_1_escrowEqualsOpenListings` and `invariant_OB_4_...` failed | S7-65 |
 
 - **Static analysis.** Slither 0.11.6 on all of `src/`, every result triaged (`security-analysis.md`). Run by hand, not in CI.
-- **CI.** Formatting, build and the full test suite (contracts and bot) on every pull request and push to `main` and `lin/integration`.
+- **CI.** Formatting, build and the full test suite (contracts and bot) on every pull request and push to `main`.
 
 ## 4. Results (2026-11-04, commit `3159dec`)
 

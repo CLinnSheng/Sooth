@@ -426,7 +426,7 @@ Full detail: [`docs/testing.md`](testing.md), [`docs/security-analysis.md`](secu
 | Static analysis | Slither 0.11.6 on all of `src/` | `. analyzed (52 contracts with 102 detectors), 23 result(s) found`; 0 real issues (14 justified, 9 false positives) |
 | Coverage | `forge coverage` | 100% lines and functions for every production file; branches 100% except `Market.sol` 93.75% (30/32) |
 | Bot tests | `uv run pytest -rs` with a scripted model and a local site | `173 passed, 15 skipped` (S7-79) |
-| CI | `.github/workflows/ci.yml`: fmt, sizes for `src/`, `forge test -vvv`; bot pytest with Chromium | Runs on PRs and pushes to `main` and `lin/integration`. GitHub results not visible to the AI (section 2) |
+| CI | `.github/workflows/ci.yml`: fmt, sizes for `src/`, `forge test -vvv`; bot pytest with Chromium | Runs on PRs and pushes to `main` (it also ran on `lin/integration` until review asked to drop it). GitHub results not visible to the AI (section 2) |
 | Doc checks | Scripts compare doc names with compiled ABIs; Mermaid parsed; addresses traced | 387/387 ABI items; 9/9 diagrams (S7-83) |
 | Independent verification | Orchestrator re-runs diff scope, build, test, fmt after each agent | Verification rows S7-15, S7-20, S7-37, S7-44b, S7-51, S7-71, S7-84, S7-92 |
 | Manual review | Lin reviewed diffs before approving commits; `/code-review` in Session 1; AI review of PR #21 | 9 findings (S1 F); 5 gaps (S4-2) |
