@@ -172,6 +172,11 @@ contract OptimisticResolverTest is Test {
             abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(resolver), 0, BOND)
         );
         resolver.propose(market, IMarket.Outcome.Yes, EVIDENCE);
+
+        _assertStatus(IOptimisticResolver.Status.None);
+        assertEq(resolver.requestOf(market).proposer, address(0));
+        assertEq(usdc.balanceOf(proposer), BOND);
+        _assertHeldBonds(0);
     }
 
     // dispute
@@ -220,6 +225,22 @@ contract OptimisticResolverTest is Test {
             abi.encodeWithSelector(IOptimisticResolver.WrongStatus.selector, IOptimisticResolver.Status.Disputed)
         );
         resolver.dispute(market, EVIDENCE);
+    }
+
+    function test_RevertWhen_DisputerHasNotApproved() public {
+        vm.warp(closeTime);
+        _propose(IMarket.Outcome.Yes);
+        usdc.mint(disputer, BOND);
+        vm.prank(disputer);
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(resolver), 0, BOND)
+        );
+        resolver.dispute(market, EVIDENCE);
+
+        _assertStatus(IOptimisticResolver.Status.Proposed);
+        assertEq(resolver.requestOf(market).disputer, address(0));
+        assertEq(usdc.balanceOf(disputer), BOND);
+        _assertHeldBonds(1);
     }
 
     // finalize
@@ -364,6 +385,59 @@ contract OptimisticResolverTest is Test {
             abi.encodeWithSelector(IOptimisticResolver.WrongStatus.selector, IOptimisticResolver.Status.None)
         );
         resolver.refund(market);
+    }
+
+    // settled requests
+
+    /// @dev Every transition out of `Settled` reverts and moves no bond.
+    function _assertSettledIsFinal() private {
+        _assertStatus(IOptimisticResolver.Status.Settled);
+        uint256 heldBefore = usdc.balanceOf(address(resolver));
+        bytes memory settled =
+            abi.encodeWithSelector(IOptimisticResolver.WrongStatus.selector, IOptimisticResolver.Status.Settled);
+
+        vm.expectRevert(settled);
+        resolver.finalize(market);
+        vm.prank(judge);
+        vm.expectRevert(settled);
+        resolver.rule(market, IMarket.Outcome.No);
+        vm.expectRevert(settled);
+        resolver.refund(market);
+        _fundBond(alice);
+        vm.prank(alice);
+        vm.expectRevert(settled);
+        resolver.dispute(market, EVIDENCE);
+
+        _assertStatus(IOptimisticResolver.Status.Settled);
+        assertEq(usdc.balanceOf(address(resolver)), heldBefore);
+        assertEq(usdc.balanceOf(alice), BOND);
+    }
+
+    function test_RevertWhen_FinalizingTwice() public {
+        vm.warp(closeTime);
+        _propose(IMarket.Outcome.Yes);
+        vm.warp(closeTime + WINDOW);
+        resolver.finalize(market);
+        _assertSettledIsFinal();
+        assertEq(usdc.balanceOf(proposer), BOND);
+    }
+
+    function test_RevertWhen_RulingTwice() public {
+        _proposeAndDispute(IMarket.Outcome.Yes);
+        vm.prank(judge);
+        resolver.rule(market, IMarket.Outcome.Yes);
+        _assertSettledIsFinal();
+        assertEq(usdc.balanceOf(proposer), 2 * BOND);
+        assertEq(usdc.balanceOf(disputer), 0);
+    }
+
+    function test_RevertWhen_ActingAfterRefund() public {
+        _proposeAndDispute(IMarket.Outcome.Yes);
+        vm.warp(market.resolutionDeadline());
+        resolver.refund(market);
+        _assertSettledIsFinal();
+        assertEq(usdc.balanceOf(proposer), BOND);
+        assertEq(usdc.balanceOf(disputer), BOND);
     }
 
     // judge handover
