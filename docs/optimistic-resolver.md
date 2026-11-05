@@ -1,53 +1,39 @@
 # Optimistic resolver
 
-Resolves markets without a price feed. A bonded proposal stands unless disputed within the challenge
-window; disputes go to the judge (resolver owner). A market opts in by setting
-`arbitrator = OptimisticResolver`; no per-market config.
+`OptimisticResolver` settles markets through bonded proposals. It is suited to questions that require evidence or interpretation beyond a price-feed comparison. A market selects the resolver as its arbitrator; the resolver's owner acts as the judge for disputes.
 
-## Usage
+## Resolution workflow
 
-```bash
-# once (ADMIN = judge; defaults: 10 USDC bond, 2h window)
-FACTORY=$FACTORY forge script script/DeployOptimisticResolver.s.sol --broadcast ...
+After a market closes, anyone can propose YES or NO by posting a bond. During the challenge window, anyone can dispute that proposal by posting an equal bond. Each market can have one proposal and at most one dispute.
 
-# create a market judged by it
-ARBITRATOR=$RESOLVER SPEC="$(cat spec.json)" CLOSE_TIME=... forge script script/CreateMarket.s.sol --broadcast ...
+If the proposal is undisputed, anyone can finalize it at or after the challenge window ends. If it is disputed, only the judge can rule on the outcome. Neither path is automatic: a transaction must resolve the market before its resolution deadline.
 
-# after close (approve BOND on the collateral first); outcome: 0 = YES, 1 = NO
-cast send $RESOLVER "propose(address,uint8,string)" $MARKET 1 "ipfs://..."
-cast send $RESOLVER "dispute(address,string)" $MARKET "ipfs://..."   # within the window
-cast send $RESOLVER "finalize(address)" $MARKET                      # after an undisputed window
-cast send $RESOLVER "rule(address,uint8)" $MARKET 0                  # judge, disputed only
-cast send $RESOLVER "refund(address)" $MARKET                        # market cancelled with a request open
-```
+A proposal is accepted only if its challenge window ends strictly before the market's deadline. Disputes must be submitted before the challenge window ends. If the market cancels with a request still open, anyone can trigger a refund of the posted bonds. See [market settlement and payouts](market-settlement.md) for the market lifecycle.
 
-## Web and bot
+## Bonds and incentives
 
-- Admin → Create market → Resolution: *AI bot + disputes* sets this resolver as the arbitrator.
-- The bot (`bot/`) proposes after close from the spec's source page, with its quotes as a `data:` URI
-  in `Proposed`, and finalizes after an undisputed window. See `bot/README.md`.
-- The market page's Resolution card shows the request and its evidence, and offers whichever action
-  the resolver accepts now: propose, dispute, finalize, rule (judge wallet only), refund.
+Each resolver is bound to one factory and uses its collateral token for bonds. Its bond amount and challenge window are fixed at deployment; both must be nonzero, and the window must be shorter than the market's seven-day resolution window. Proposers and disputers must each approve the resolver to transfer their bond.
 
-## Rules
-
-| Path | Bonds |
+| Path | Bond payment |
 |---|---|
-| No dispute, `finalize` | Proposer gets theirs back |
-| Disputed, judge rules for the proposal | Proposer gets both |
-| Disputed, judge rules against it | Disputer gets both |
-| Market cancels first (`refund`) | Each side gets theirs back |
+| Undisputed proposal finalized | The proposer receives their bond back. |
+| Judge rules for the proposed outcome | The proposer receives both bonds. |
+| Judge rules against the proposed outcome | The disputer receives both bonds. |
+| Market cancels with an open request | Each party receives their bond back. |
 
-- One request per market. A wrong proposal is disputed, not out-proposed.
-- `propose` requires the window to end strictly before the market's resolution deadline; otherwise
-  it could never finalize.
-- Only markets from the configured factory with `arbitrator == this` are accepted.
-- Evidence URIs are emitted in `Proposed`/`Disputed`, not stored.
-- The judge is `Ownable2Step`; hand over to a multisig with `transferOwnership` + `acceptOwnership`.
+An undisputed proposer earns no reward beyond return of their bond. Participants pay their own transaction costs.
 
-## Limits
+## Design decisions and limitations
 
-- Bonds are pushed. A USDC-blacklisted recipient makes that settlement revert and the market cancels.
-  Switch to pull payments before real USDC.
-- No proposer reward: proposing costs gas and returns only the bond.
-- An invalid market can't be cancelled early; it waits for the 7-day deadline.
+The resolver does not validate evidence, so participants must monitor proposals and the judge must assess disputes independently. Evidence URIs are emitted in events rather than stored in the request, and may be empty. Proposal and dispute statuses are separate from the market state; the market remains closed until resolution or cancellation.
+
+The optional [bot](../bot/README.md) can propose from a market's source page, attempt finalization and refunds, and alert on disputes. Its actions depend on its checks and successful transactions.
+
+Bond payments are pushed during settlement. A failed transfer reverts the transaction, including any market resolution in it; a later refund can also fail if the transfer remains blocked. There is no early cancellation for an invalid market: if unresolved, it cancels at its deadline.
+
+## References
+
+- [Resolver contract](../contracts/src/OptimisticResolver.sol) and [interface](../contracts/src/interfaces/IOptimisticResolver.sol): requests, actions, and bond settlement.
+- [Resolver tests](../contracts/test/OptimisticResolver.t.sol): timing, permissions, bond payments, and refunds.
+- [Deployment](../contracts/script/DeployOptimisticResolver.s.sol) and [market creation](../contracts/script/CreateMarket.s.sol) scripts: configuration and operation.
+- [Chainlink resolver](chainlink-resolver.md): price-feed settlement for questions that can be decided by a threshold.
