@@ -306,14 +306,19 @@ How it reads the chain (`web/src/chain.ts`):
 3. Reads each market's pools, `closeTime`, `state`, `winningOutcome` and `liquidityWithdrawn`.
 4. Scans logs with `getLogs` from `DEPLOY_BLOCK` (`50_040_022`) for the factory, both resolvers and every
    market: `MarketCreated`, `Bought`, `Sold`, `FeesWithdrawn`, `LiquidityWithdrawn`, `Redeemed`,
-   `Proposed`, `Disputed`, `Finalized`, `Ruled`, `Refunded`, `PriceResolved`. Ranges are up to 10,000,000
+   `Proposed`, `Disputed`, `Finalized`, `Ruled`, `Refunded`, `PriceResolved`, and, once `ORDER_BOOK` is set,
+   the order book's `Listed`, `Filled` and `Cancelled`. Ranges are up to 10,000,000
    blocks per call (`MAX_LOG_RANGE`). Later refreshes scan only new blocks.
 5. Refetches every 30 seconds. Positions come from `OutcomeToken.balanceOfBatch`.
 
 The RPC is a public Tenderly gateway for Base Sepolia (it allows large `getLogs` ranges), with viem's
 default RPC as fallback. There is no indexer and no backend: all history is rebuilt in the browser. The
-code marks this as a shortcut (an indexer such as Ponder is the planned fix). Order-book data is read with
-view calls (`bestPrice`, `listingsOf`, `getListing`, `quoteBuy`), not from logs.
+code marks this as a shortcut (an indexer such as Ponder is the planned fix). The live order book (best
+price, listings, quotes) is read with view calls (`bestPrice`, `listingsOf`, `getListing`, `quoteBuy`).
+Order-book history comes from its logs: each `Filled` becomes a Buy row for the buyer and a Sell row for
+the seller (tagged "book"), `Listed` and `Cancelled` become List and Cancel rows in the seller's portfolio
+history, and open listings count in the seller's position as "listed". The AMM price chart and volume use
+pool trades only. Details: [order-book.md](order-book.md#website).
 
 Wallets: browser extension wallets (with EIP-6963 discovery on). With `VITE_WALLETCONNECT_PROJECT_ID` set, the
 list is MetaMask, Trust, Rabby, Phantom and WalletConnect.

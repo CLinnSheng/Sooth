@@ -20,6 +20,8 @@ Times are local time (UTC+8) unless marked UTC. The tool was Claude Code. Sessio
 | 6 | Gaps found in review of the merged resolution code | Review findings | Open |
 | 7 | Orchestrator slips in Session 6 | Process | Partly fixed |
 | 8 | Invariant tests merged without running CI's build step; CI broke | Process / verification | Fixed |
+| 9 | Tests that passed but missed bugs, found by an independent review | Test quality | Fixed |
+| 10 | Order-book panel: wrong "Not enough mUSDC" while loading, and trades missing from history | UI bug / missing feature | Fixed |
 
 ---
 
@@ -381,3 +383,79 @@ A red CI on the integration branch hides real failures in later pushes, and the 
 - Still protective (F2): a temporary 26,308-byte contract in `src/` makes the new step exit 1; file removed afterwards.
 - F3: `forge test` 195 passed, 0 failed. F4: actionlint exit 0.
 - GitHub Actions run on `lin/integration` after the fix: TODO: evidence (run link).
+
+---
+
+## 9. Tests that passed but missed bugs, found by an independent review
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-05 |
+| Tool | Claude Code: `contracts-engineer` (P2-5) and `test-security` (P1-2) wrote the tests; two fresh `test-security` agents reviewed them read-only |
+| Prompt / context given | User: "please make sure all the unit tests and e2e test you added make sense, theres too much i wont review it." Reviewers got a checklist and could plant bugs if they restored the code byte for byte |
+| Commit | Bugs: `99bcf7a` (order book tests), `e6485bd` (invariants). Fixes: `2cae6a8` (PR 2), `bbfc986` (PR 3) |
+| Files affected | `contracts/test/OutcomeOrderBook.t.sol`, `contracts/test/invariant/SoothInvariants.t.sol`, `contracts/test/invariant/ResolverHandler.sol`, `docs/invariants.md` |
+| Severity | Medium |
+
+### Summary
+
+Three AI-written tests looked like they checked something they didn't. `test_Buy_PartialLastListingCountsAsTouched` never reached the `maxListings` limit its name promises. `invariant_BND_4_refundMakesEveryoneWhole` missed a refund paid to the wrong person. A `bondNet` check in `ResolverHandler` could never fail.
+
+### Why the AI made the mistake
+
+Wrong assumption: a test whose name describes a property, and that passes, was taken to prove that property. Nobody planted the specific bug each test was meant to catch. In the invariant suite the refund path was reached only once per 64-run campaign, which the handler's reach summary showed but nobody checked. The `bondNet` check compared numbers the handler itself had just set, so it was true by construction.
+
+### Why it is problematic
+
+False assurance on fund-moving code. A bug in the `maxListings` limit (touching one listing too many) or a refund sent to the wrong address would have shipped with every test green. The team was about to merge without reading the tests, relying on these suites.
+
+### How we fixed it
+
+- Order book (`2cae6a8`): a second buy now has to stop after the half-filled listing.
+- Invariants (`bbfc986`): `afterInvariant` checks each refund recipient's balance; the handler now refunds disputed requests and hits the deadline edge; the `bondNet` mapping and its check were removed and the INV-BND-4 note in `docs/invariants.md` corrected.
+- Process: test reviews now plant the bug each test claims to catch, and check reach counts for rare paths.
+
+### Evidence the fix works
+
+- Planted bug `touched < maxListings` → `<=`: before, only `test_Buy_StopsAtMaxListings` failed (`actions.md` S7-119); after, `[FAIL: stops after the one listing it may touch: 15000000 != 5000000] test_Buy_PartialLastListingCountsAsTouched()` (S7-124).
+- Planted bug "refund pays the disputer's bond to the proposer": before, all 20 invariants passed (S7-122); after, `refund paid wrong amounts or someone gained or lost: 2 != 0` (`invariant_BND_4`) and `refund: proposer gets one bond: 20000000 != 10000000` (`afterInvariant`) (S7-125).
+- Refund reach per campaign: 1 → 11 (S7-125). Full suites after the fixes: PR 2 175 passed, PR 3 176 passed, fmt and size checks exit 0 (S7-125).
+- Not changed: two constant-only asserts in `EndToEnd._simpleTrades` (PR 1, already merged); the order-book fuzz test does not check cost rounding, which four unit tests do (S7-119).
+
+---
+
+## 10. Order-book panel: wrong "Not enough mUSDC" while loading, and trades missing from history
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-05 |
+| Tool | Claude Code (`general-purpose` agent wrote the panel in P2-6; the main session ran the UI test) |
+| Prompt / context given | User: "Ok please make sure you tested it locally and e2e test with the UI instead of just relying on the CI unit test". Lin, after testing in MetaMask: "the only complaint is that the trading with others actiosn is not logged in the history." |
+| Commit | Bug: `36687d6` (panel). Fixes: `af913e4` (loading), `e03cc6d` (trades in history), `5baba74` (listings in history, listed shares in positions) |
+| Files affected | `web/src/orderbook.tsx`, `web/src/chain.ts`, `web/src/mock.ts`, `web/src/pages/Market.tsx`, `web/src/pages/Portfolio.tsx` |
+| Severity | Low (UX); Medium for wrong average price and PnL |
+
+### Summary
+
+Two problems that build, lint and contract tests could not see. Right after a quote appeared, the buy button said "Not enough mUSDC" for a buyer holding 100 mUSDC. And order-book trades never appeared in activity or portfolio history, so a buyer who bought only from the book had no average price and a wrong PnL.
+
+### Why the AI made the mistake
+
+Missing context: the panel was checked statically (build, lint, ABI match) but never used in a browser before review. It defaulted not-yet-loaded wallet reads to zero (`reads ?? [0n, ...]`). The history code only scanned the markets' own `Bought`/`Sold` events, and the agent building the panel was not asked to wire the order book into history.
+
+### Why it is problematic
+
+Users see a false error and may give up on a valid trade. Portfolio numbers were wrong for anyone who used the book: positions bought there showed an average price of 0, and listed shares disappeared from positions while waiting.
+
+### How we fixed it
+
+- `af913e4`: buttons say "Loading balances…" until the reads arrive.
+- `e03cc6d`: the site scans the book's `Filled` events; each fill is a Buy row for the buyer and a Sell row for the seller, tagged "book", counted in average price and PnL. The chart and volume stay AMM-only.
+- `5baba74`: `Listed` and `Cancelled` become List and Cancel rows in the seller's history; open listings count in positions as "N listed"; the redeem amount uses wallet shares only.
+
+### Evidence the fix works
+
+- UI test before the fix: the first buyer run found only a disabled "Not enough mUSDC" button; waiting for the reads gave "Approve mUSDC, then buy" (S7-121).
+- After `e03cc6d`, on the local fork: Recent activity shows Lin's own manual fills as Buy/Sell rows tagged "book"; the buyer's position is 20 YES at a 70¢ average, 14.00 USDC in; volume stays 35 USDC (AMM only) (S7-124).
+- After `5baba74`: the seller's history shows List and Cancel rows; the position shows "30.38 YES, 5.00 listed"; with every share listed the position still shows; PnL +3.58 matches the hand calculation 25.50 + 19.58 − 41.50 (S7-128).
+- The loading fix itself was verified by code review and build/lint only: a browser run that slowed the balance reads could not be completed (S7-124). TODO: evidence (browser check of the loading state).

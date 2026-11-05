@@ -284,7 +284,9 @@ Severity is our judgement. No issue here let an outsider take funds in deployed 
 | 10 | Wrong facts in AI-written docs | Docs accuracy | Low | Fixed when caught | Below |
 | 11 | Orchestrator slips and log gaps; `actions.md` row-ID clashes | Process | Low | Partly fixed | lin.md #7, below |
 | 12 | `forge fmt` on the whole repo rewrote 7 teammate files | Tool misuse | Low | Fixed, spec updated | lin.md #2 |
-| 13 | AI log says Opus was used in every session; transcripts show Sonnet too | Docs accuracy | Low | Open (flagged here) | Below |
+| 13 | AI log says Opus was used in every session; transcripts show Sonnet too | Docs accuracy | Low | Fixed in `lin.md` header | Below |
+| 14 | Tests that passed but missed bugs, found by an independent review (`maxListings` test, refund invariant, a check that could never fail) | Test quality | Medium | Fixed | lin.md #9 |
+| 15 | Order-book panel: false "Not enough mUSDC" while loading; order-book trades and listings missing from history, so average price and PnL were wrong | UI bug / missing feature | Low to Medium | Fixed | lin.md #10 |
 
 Risks of the in-product AI agent (from `docs/threat-model.md`, not AI coding mistakes):
 
@@ -346,7 +348,7 @@ Date 2026-11-04. Tool: `contracts-engineer` (P2-5) and `test-security` (P1-2) ag
 1. **Why the AI made the mistake.** Wrong assumption: a test that runs and passes is a test that checks something. The first order-book fuzz mix gave "about 1 fill per run" (S7-44), so the fill logic was hardly fuzzed. In P1-2 the agent had to make "reach edits" to its handler (selector weights, `_pick`, bookBuy targeting, close times; S7-61). The log does not record the reach before those edits. Mutant (b), which deletes the `liquidityWithdrawn` check, survived the handler until a `bulkDonateShares` action was added (S7-63).
 2. **Why it is problematic.** False assurance on fund-moving code. A fuzz test that never fills cannot find a fill bug. The progress log in `work_plan.md` says "4/4 mutants killed" for P1-2. That hides that mutant (b) dies only in a donation scenario. In the normal flow the pool burn already blocks a second withdrawal, so the check is close to redundant there.
 3. **How we fixed it.** The agents measured reach before claiming success. Order-book fuzz reweighted (2/5 list, 2/5 buy, half the buys at any price, 30 steps). Invariant handler given weighted selectors and edge warps, plus a reach summary (`SOOTH_INVARIANT_SUMMARY=true`). Mutation checks run on every new suite. `docs/testing.md` states the mutant (b) caveat in its mutation table.
-4. **Evidence the fix works.** Order-book fuzz: 299 fills over 50 seeds after reweighting (S7-44). Deep invariant run: `runs: 512, calls: 65536, reverts: 0`, with reach totals such as bookBuy 359, redeem 1629, dispute 255 over 519 runs (S7-69). Mutants (a), (c) and (d) killed by named invariants (S7-62, S7-64, S7-65). Not fixed: the "4/4" line in `work_plan.md` still has no caveat.
+4. **Evidence the fix works.** Order-book fuzz: 299 fills over 50 seeds after reweighting (S7-44). Deep invariant run: `runs: 512, calls: 65536, reverts: 0`, with reach totals such as bookBuy 359, redeem 1629, dispute 255 over 519 runs (S7-69). Mutants (a), (c) and (d) killed by named invariants (S7-62, S7-64, S7-65). Since fixed: the "4/4" line in `work_plan.md` now states the mutant (b) caveat. A later independent review found three more weak tests of the same kind (issue 14, `lin.md` #9).
 
 #### Issue 7. Change log claimed a check that was never done (lin.md #4)
 
@@ -430,13 +432,15 @@ Full detail: [`docs/testing.md`](testing.md), [`docs/security-analysis.md`](secu
 | Doc checks | Scripts compare doc names with compiled ABIs; Mermaid parsed; addresses traced | 387/387 ABI items; 9/9 diagrams (S7-83) |
 | Independent verification | Orchestrator re-runs diff scope, build, test, fmt after each agent | Verification rows S7-15, S7-20, S7-37, S7-44b, S7-51, S7-71, S7-84, S7-92 |
 | Manual review | Lin reviewed diffs before approving commits; `/code-review` in Session 1; AI review of PR #21 | 9 findings (S1 F); 5 gaps (S4-2) |
-| Testnet simulation | Local Anvil deploy and `cast` calls in Session 1 (E4) | Base Sepolia deploy of the order book and a live demo with tx hashes: TODO: evidence (P4-1, P4-2 `todo`) |
+| Independent test review | Two fresh reviewer agents checked every test added in PRs 1–3 and planted bugs to test them | No wrong tests; 3 weak ones fixed (issue 14; S7-119, S7-122) |
+| UI end-to-end (local fork) | Website run against an Anvil fork of Base Sepolia; Playwright script with a test-only wallet; Lin repeated it by hand in MetaMask | U1–U8, H1–H5, L1–L7 pass; found issue 15 (S7-121, S7-124, S7-128) |
+| Testnet simulation | Local Anvil deploy and `cast` calls in Session 1 (E4); fork of Base Sepolia with the real deployed contracts (B1–B9, S7-112) | Base Sepolia deploy of the order book and a live demo with tx hashes: TODO: evidence (P4-1, P4-2 `todo`) |
 
 Critical notes:
 
 - Most checks were run by the same AI that wrote the code. Issue 3 shows that this kind of verification can skip a step. Issue 6 shows that a passing suite can be weak.
 - Slither and coverage are not in CI. They were run by hand on two dates.
-- The website (`web/`) has no automated tests (`docs/testing.md` §5).
+- The website (`web/`) has no automated tests in the repo. The UI end-to-end run used a script and a patched site copy kept outside the repo (`docs/testing.md` §3).
 - There is no prompt-injection test against a real LLM.
 - TODO(team): validation done by teammates on their own code (trading, PR #21, web, bot).
 
