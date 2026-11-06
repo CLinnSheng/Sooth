@@ -93,5 +93,15 @@ The frontend also provides `npm run build` for type-checking and a production bu
 - [Market settlement and payouts](docs/market-settlement.md) — lifecycle, resolution, cancellation, redemption, and withdrawals.
 - [Chainlink resolver](docs/chainlink-resolver.md) — price-feed settlement and operation.
 - [Optimistic resolver](docs/optimistic-resolver.md) — bonded proposals, disputes, judging, and operation.
+- [Order book](docs/order-book.md) — secondary trading of outcome shares between users (Bonus 1).
+- [Architecture](docs/architecture.md) — system overview, contract interactions, and sequence diagrams.
+- [Contract spec](docs/contract-spec.md) — every contract's functions, events, errors, and access rules.
+- [Invariants](docs/invariants.md) — the rules the contracts must keep, and the tests that check them.
+- [Threat model](docs/threat-model.md) — trust assumptions, threats, mitigations, and known limitations.
+- [Security analysis](docs/security-analysis.md) — Slither results and coverage.
+- [Testing](docs/testing.md) — how to run every test suite and what each covers.
+- [Live demo checklist](docs/demo-checklist.md) — step-by-step Base Sepolia demo.
+- [Final report](docs/final-report.md) and [cross-explanation notes](docs/cross-explanation.md).
+- [AI Audit Report](docs/ai-audit-report.md) and the [AI audit log](docs/ai/README.md).
 
 The resolver guides describe their respective feed, sequencer, bond-transfer, and operational limitations. Choose an arbitrator and collateral token whose assumptions match the market and deployment environment.
