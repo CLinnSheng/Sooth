@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { useAccount } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { Change, ClaimButton, PAGE_SIZE, PriceChart, ProbabilityBar, ShowMore, StatusBadge, TradePanel } from '../components'
+import { OrderBookPanel } from '../orderbook'
 import { ResolutionPanel } from '../resolution'
 import {
   ago,
@@ -24,6 +25,7 @@ import {
   shortAddr,
   signed,
   usdc,
+  walletShares,
   type Outcome,
 } from '../mock'
 
@@ -51,10 +53,12 @@ export default function Market() {
 
   const p = priceYes(market)
   const mine = positions.filter((pos) => pos.marketId === market.id)
-  const payout = mine.reduce((sum, pos) => sum + positionValue(pos, market), 0)
+  // redeem() only pays wallet shares; listed ones come back by cancelling the listing first.
+  const payout = mine.reduce((sum, pos) => sum + positionValue({ ...pos, shares: walletShares(pos) }, market), 0)
   const canWithdrawLiquidity =
     isSettled(market) && !market.liquidityWithdrawn && address?.toLowerCase() === market.creator.toLowerCase()
-  const activity = data.trades.filter((t) => t.marketId === market.id).toReversed()
+  // Completed trades only: order-book List and Cancel rows show in the seller's portfolio history.
+  const activity = data.trades.filter((t) => t.marketId === market.id && (t.side === 'Buy' || t.side === 'Sell')).toReversed()
   const liquidity = Math.sqrt(market.yesReserve * market.noReserve)
   // The last history point is stamped when markets load, so the page and chart share one clock.
   const now = market.history.at(-1)!.at
@@ -117,6 +121,9 @@ export default function Market() {
       </aside>
 
       <section className="flex flex-col gap-6 lg:col-start-1">
+        {/* Right after the AMM panel on mobile, top of the left column on desktop; renders nothing until deployed. */}
+        <OrderBookPanel market={market} outcome={outcome} setOutcome={setOutcome} />
+
         {mine.length > 0 && (
           <div className="flex flex-col gap-3 rounded-3xl bg-surface p-5">
             <h2 className="font-semibold">Your position</h2>
@@ -125,7 +132,11 @@ export default function Market() {
               const pnl = value - pos.shares * pos.avgPrice
               return (
                 <div key={pos.outcome} className="grid grid-cols-2 gap-y-1 text-sm sm:grid-cols-4">
-                  <div><p className="text-xs text-muted">Shares</p>{pos.shares} {pos.outcome}</div>
+                  <div>
+                    <p className="text-xs text-muted">Shares</p>
+                    {pos.shares} {pos.outcome}
+                    {pos.listed ? <span className="ml-1 text-xs text-muted">({usdc(pos.listed)} listed)</span> : null}
+                  </div>
                   <div><p className="text-xs text-muted">Avg / now</p>{cents(pos.avgPrice)} / {cents(priceOf(market, pos.outcome))}</div>
                   <div><p className="text-xs text-muted">Value</p>{usdc(value)} USDC</div>
                   <div>
@@ -180,12 +191,15 @@ export default function Market() {
                 // Fixed grid columns and tabular digits keep every row's numbers lined up.
                 <li
                   key={`${t.tx}-${i}`}
-                  className="grid grid-cols-[6.5rem_4.5rem_1fr_4.5rem_1rem] items-center gap-3 whitespace-nowrap py-2 tabular-nums sm:grid-cols-[6.5rem_4.5rem_4.5rem_3.5rem_1fr_4.5rem_1rem]"
+                  className="grid grid-cols-[6.5rem_6.5rem_1fr_4.5rem_1rem] items-center gap-3 whitespace-nowrap py-2 tabular-nums sm:grid-cols-[6.5rem_6.5rem_4.5rem_3.5rem_1fr_4.5rem_1rem]"
                 >
                   <Link to={`/portfolio/${t.trader}`} className="text-muted hover:text-white hover:underline">
                     {shortAddr(t.trader)}
                   </Link>
-                  <span className={t.outcome === 'YES' ? 'text-yes' : 'text-no'}>{t.side} {t.outcome}</span>
+                  <span className={t.outcome === 'YES' ? 'text-yes' : 'text-no'}>
+                    {t.side} {t.outcome}
+                    {t.venue === 'book' && <span className="ml-1 text-xs text-muted" title="Traded with another user on the order book">book</span>}
+                  </span>
                   <span className="hidden text-right text-muted sm:block">{usdc(t.shares)}</span>
                   <span className="hidden text-muted sm:block">@ {cents(t.amount / t.shares)}</span>
                   <span className="text-right">{usdc(t.amount)} USDC</span>

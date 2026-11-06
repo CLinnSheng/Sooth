@@ -41,19 +41,21 @@ export type Market = {
   source?: { label: string; url: string }
 }
 
-export type Position = { marketId: number; outcome: Outcome; shares: number; avgPrice: number }
+// shares includes `listed`: shares waiting in the order book still belong to the seller until bought.
+export type Position = { marketId: number; outcome: Outcome; shares: number; avgPrice: number; listed?: number }
 
 export type Redemption = { marketId: number; holder: string; payout: number } // USDC
 
 export type Trade = {
   marketId: number
   trader: string
-  side: 'Buy' | 'Sell'
+  side: 'Buy' | 'Sell' | 'List' | 'Cancel' // List and Cancel are order-book listings, not trades
   outcome: Outcome
   amount: number // USDC paid or received
   shares: number
   at: string // ISO timestamp
   tx: string
+  venue?: 'amm' | 'book' // order-book fills set 'book'; AMM trades leave it unset
 }
 
 export const FEE = 0.01 // Market.FEE_BPS = 100
@@ -73,6 +75,9 @@ export const DAY_SECS = 86_400
 // YES price in force at `at`: the last point at or before it, or the opening price before creation.
 export const priceAt = (m: Market, at: number) => (m.history.findLast((pt) => pt.at <= at) ?? m.history[0]).price
 export const changeSince = (m: Market, secs: number) => priceYes(m) - priceAt(m, Date.now() / 1000 - secs)
+
+// Shares in the wallet, the only ones redeem() can pay out (listed shares must be cancelled first).
+export const walletShares = (p: Position) => p.shares - (p.listed ?? 0)
 
 // Value of a position now: resolved markets pay 1 per winning share, 0 per losing share; cancelled pay half.
 export function positionValue(p: Position, m: Market) {

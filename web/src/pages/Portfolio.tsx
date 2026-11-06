@@ -7,7 +7,7 @@ import { useAccount, useReadContract } from 'wagmi'
 import { useMarkets, usePositions } from '../chain'
 import { ClaimButton, PAGE_SIZE, ShowMore } from '../components'
 import { USDC } from '../contracts'
-import { ago, basescanAddr, cents, isSettled, positionValue, priceOf, shortAddr, signed, usdc } from '../mock'
+import { ago, basescanAddr, cents, isSettled, positionValue, priceOf, shortAddr, signed, usdc, walletShares } from '../mock'
 
 // /portfolio is the connected wallet; /portfolio/:address is anyone's, read-only from public chain data.
 export default function Portfolio() {
@@ -65,7 +65,9 @@ export default function Portfolio() {
   const redeemed = data.redemptions.filter((r) => isOwner(r.holder)).reduce((s, r) => s + r.payout, 0)
   const pnl = soldFor + redeemed + total - paidIn
   // redeem() pays both sides at once, so each row's button shows its market's total.
-  const payout = (marketId: number) => rows.filter((r) => r.m.id === marketId).reduce((s, r) => s + r.value, 0)
+  // Listed shares are excluded: they must be cancelled from the order book before redeem() can pay them.
+  const payout = (marketId: number) =>
+    rows.filter((r) => r.m.id === marketId).reduce((s, r) => s + positionValue({ ...r.p, shares: walletShares(r.p) }, r.m), 0)
   const history = data.trades.filter((t) => t.trader.toLowerCase() === owner.toLowerCase()).toReversed()
   const cash = isOwn ? wallet?.usdc : viewedCash === undefined ? null : Number(formatUnits(viewedCash, 6))
 
@@ -133,7 +135,10 @@ export default function Portfolio() {
                 <tr key={`${p.marketId}-${p.outcome}`}>
                   <td className="max-w-xs p-4"><Link to={`/market/${m.id}`} className="hover:underline">{m.question}</Link></td>
                   <td className={`p-4 ${p.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{p.outcome}</td>
-                  <td className="p-4 text-right">{usdc(p.shares)}</td>
+                  <td className="p-4 text-right">
+                    {usdc(p.shares)}
+                    {p.listed ? <span className="block text-xs text-muted">{usdc(p.listed)} listed</span> : null}
+                  </td>
                   <td className="p-4 text-right">{cents(p.avgPrice)}</td>
                   <td className="p-4 text-right">
                     {m.status === 'resolved' ? (
@@ -172,7 +177,10 @@ export default function Portfolio() {
               {history.slice(0, historyShown).map((t, i) => (
                 <tr key={`${t.tx}-${i}`}>
                   <td className="p-4 text-muted" title={new Date(t.at).toLocaleString()}>{ago(t.at)}</td>
-                  <td className={`p-4 ${t.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>{t.side} {t.outcome}</td>
+                  <td className={`p-4 ${t.outcome === 'YES' ? 'text-yes' : 'text-no'}`}>
+                    {t.side} {t.outcome}
+                    {t.venue === 'book' && <span className="ml-1 text-xs text-muted" title="Traded with another user on the order book">book</span>}
+                  </td>
                   <td className="max-w-xs p-4"><Link to={`/market/${t.marketId}`} className="hover:underline">{marketById(t.marketId).question}</Link></td>
                   <td className="p-4 text-right">{usdc(t.shares)} @ {cents(t.amount / t.shares)}</td>
                   <td className="p-4 text-right">{usdc(t.amount)} USDC</td>
