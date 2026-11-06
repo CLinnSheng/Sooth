@@ -199,7 +199,7 @@ The first two rows use names from the skipped P2-2 plan (`work_plan.md`); they a
 
 `OutcomeOrderBook` is merged (`lin/integration`, commit `99bcf7a`) with 38 unit and fuzz tests in
 `contracts/test/OutcomeOrderBook.t.sol` and stateful invariants INV-OB-1 to INV-OB-5 in
-`contracts/test/invariant/SoothInvariants.t.sol`. Reference: `docs/order-book.md`. It is not deployed yet.
+`contracts/test/invariant/SoothInvariants.t.sol`. Reference: `docs/order-book.md`. Deployed on Base Sepolia at `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05`.
 
 Summary: holders `list` shares into escrow at a price; buyers `buy(market, outcome, shares, maxPrice,
 maxListings)` fill cheapest first, oldest first at the same price, paying each seller directly; `cancel`

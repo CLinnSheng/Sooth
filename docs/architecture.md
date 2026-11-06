@@ -69,7 +69,7 @@ arbitrator), the judge, the Chainlink feed and any custom arbitrator. See
 | `OutcomeToken` | One ERC-1155 for all markets. Token id = `keccak256(abi.encode(marketId, outcome))` | [§3](contract-spec.md#3-outcometoken) |
 | `OptimisticResolver` | Arbitrator: bonded proposal, dispute, judge | [§4](contract-spec.md#4-optimisticresolver) |
 | `ChainlinkResolver` | Arbitrator: price at close from a Chainlink feed | [§5](contract-spec.md#5-chainlinkresolver) |
-| `OutcomeOrderBook` | Fixed-price listings of shares. Not deployed yet | [§6](contract-spec.md#6-outcomeorderbook) |
+| `OutcomeOrderBook` | Fixed-price listings of shares. Deployed at `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05` | [§6](contract-spec.md#6-outcomeorderbook) |
 
 ```mermaid
 flowchart TD
@@ -248,8 +248,8 @@ every market of the factory. Listings are kept per (market, outcome), cheapest f
 same price. It works only while the market is `Open`; `cancel` works in every state. Details:
 [order-book.md](order-book.md).
 
-It is **not deployed yet** (`DeployOrderBook.s.sol`). The website hides its panel while `ORDER_BOOK` in
-`web/src/contracts.ts` is the zero address.
+It is deployed on Base Sepolia at `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05` (`DeployOrderBook.s.sol`). The website shows its panel because
+`ORDER_BOOK` in `web/src/contracts.ts` is set; setting it to the zero address hides the panel again.
 
 ```mermaid
 sequenceDiagram
@@ -373,7 +373,7 @@ proposal.
 | `OptimisticResolver` | `0xe37DB6692De70F5fe69fcABb64b7C737fA096335` | `broadcast/DeployOptimisticResolver.s.sol/84532/run-latest.json`, block 50040832 |
 | `ChainlinkResolver` | `0xAD3F05e6eFFeCD81278894266f5816691E704638` | `broadcast/DeployChainlinkResolver.s.sol/84532/run-latest.json`, block 50040516 |
 | `MockUSDC` (collateral) | `0x5f29331BBBA6f605942f5de0B217359F3C7B7c51` | `COLLATERAL` argument of the factory deploy; `web/src/contracts.ts` |
-| `OutcomeOrderBook` | not deployed yet (`DeployOrderBook.s.sol`) | |
+| `OutcomeOrderBook` | `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05` | `broadcast/DeployOrderBook.s.sol/84532/run-latest.json`, block 55252775 |
 
 Market clones are created by `createMarket`; their addresses come from `factory.markets(id)`.
 
@@ -384,7 +384,7 @@ flowchart LR
     usdc["MockUSDC<br/>(test chains only)"] --> fac["DeployMarketFactory<br/>also deploys OutcomeToken<br/>and Market implementation"]
     fac --> opt["DeployOptimisticResolver<br/>FACTORY"]
     fac --> cl["DeployChainlinkResolver"]
-    fac --> ob["DeployOrderBook<br/>FACTORY (not run yet)"]
+    fac --> ob["DeployOrderBook<br/>FACTORY"]
     opt --> web["Update web/src/contracts.ts<br/>and bot .env"]
     cl --> web
     ob --> web

@@ -40,7 +40,7 @@ website and a bot sit on top, but neither can move funds by itself.
 | What does the blockchain guarantee? | Settlement: custody, exact payouts, once. Not the truth of the outcome (trust statement, `threat-model.md` §3) |
 | What is the oracle problem and how do you handle it? | A contract cannot see the world. We make reporting accountable (bonds, challenge window, judge, Chainlink round checks) and add a timeout so funds are never stuck. It is reduced, not solved |
 | What is on chain vs off chain? | Funds, prices, states, outcomes, bonds on chain. Spec display, history, charts, the LLM and the bot off chain (`architecture.md` §2) |
-| Which requirements and bonuses are met? | All three core features; Bonus 1 built but not deployed yet; Bonus 2 and 3 skipped (`final-report.md` §3) |
+| Which requirements and bonuses are met? | All three core features; Bonus 1 built and deployed on Base Sepolia; Bonus 2 and 3 skipped (`final-report.md` §3) |
 | Is there a backend? | No. The website reads the chain directly; the bot is optional |
 
 Files: `docs/architecture.md`, `docs/final-report.md`.
@@ -181,7 +181,7 @@ charges no fee, and needs no change to `Market`.
 | Gas limits? | `maxListings` caps `buy`: 157,339 gas for 1 listing, 657,640 for 10 (`test_Gas_BuyOneVersusTenListings`). Insert gas grows with cheaper listings (B-1) |
 | Can shares get stuck? | No, `cancel` works in every state |
 | Can a fake market be used? | No: `factory.markets(market.marketId()) == market` (`NotFactoryMarket`) |
-| Is it live? | Merged, not deployed. The website panel is hidden while `ORDER_BOOK` is the zero address |
+| Is it live? | Yes, on Base Sepolia at `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05`. The website panel shows because `ORDER_BOOK` is set |
 
 Files: `contracts/src/OutcomeOrderBook.sol`, `contracts/test/OutcomeOrderBook.t.sol`,
 `web/src/orderbook.tsx`, `docs/order-book.md`, `secondary_trading_plan.md` (outside the repo, Q1-Q5).
@@ -259,7 +259,7 @@ Files: `contracts/test/`, `contracts/test/invariant/`, `docs/testing.md`, `docs/
 
 **Explain in 60 seconds.** Deploy order: `DeployMarketFactory` (which also deploys `OutcomeToken` and the
 `Market` implementation), then `DeployOptimisticResolver` and `DeployChainlinkResolver`, then
-`DeployOrderBook` (not run yet). Addresses are copied by hand into `web/src/contracts.ts` and the bot's
+`DeployOrderBook` (order book at `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05`). Addresses are copied by hand into `web/src/contracts.ts` and the bot's
 `.env`. Factory `0x8d399B14ea106bA62F79186217DB6fF1F75dc492` on Base Sepolia, block 50040022. CI runs
 format, size and test checks for contracts, and `pytest` for the bot, on pushes and pull requests to
 `main`.
