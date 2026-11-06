@@ -31,7 +31,7 @@ For *why* and worked examples, follow the links to the per-component docs.
 | `Market` | `src/Market.sol` | One binary market (AMM, resolution, payout) | 1 implementation + 1 EIP-1167 clone per market | none | implementation `0x3a69D08ba7Ab7CcE6f8f53Fc193bAD9Ac661D098`; clones from `factory.markets(id)` |
 | `OptimisticResolver` | `src/OptimisticResolver.sol` | Arbitrator: bonded proposal, dispute, judge | 1 | owner = judge (`Ownable2Step`) | `0xe37DB6692De70F5fe69fcABb64b7C737fA096335` |
 | `ChainlinkResolver` | `src/ChainlinkResolver.sol` | Arbitrator: price feed | 1 | owner (`Ownable`) | `0xAD3F05e6eFFeCD81278894266f5816691E704638` |
-| `OutcomeOrderBook` | `src/OutcomeOrderBook.sol` | Fixed-price share listings (Bonus 1) | 1 | none | not deployed yet (`DeployOrderBook.s.sol`) |
+| `OutcomeOrderBook` | `src/OutcomeOrderBook.sol` | Fixed-price share listings (Bonus 1) | 1 | none | `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05` |
 | `OutcomeTokenId` | `src/libraries/OutcomeTokenId.sol` | Library: token id formula | inlined | n/a | n/a |
 | `MockUSDC` | `src/mocks/MockUSDC.sol` | Test collateral, anyone can mint | test chains only | none | `0x5f29331BBBA6f605942f5de0B217359F3C7B7c51` |
 | `MockAggregator` | `src/mocks/MockAggregator.sol` | Test Chainlink feed | tests only | none | not deployed |
@@ -387,8 +387,8 @@ buyers fill from the cheapest listing first, oldest first at equal price, and pa
 No owner, no fee, no mint or burn. Interface: `IOutcomeOrderBook`. Inherits `ERC1155Holder`,
 `ReentrancyGuardTransient`. Usage and examples: [order-book.md](order-book.md).
 
-**Not deployed yet** (`DeployOrderBook.s.sol`). While `ORDER_BOOK` in `web/src/contracts.ts` is the zero
-address, the website hides the order-book panel.
+**Deployed** on Base Sepolia at `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05` (tx `0x66f0f8f79de12a3c12b14bf37d8e11e9d61aa839bee686db7b488ef54ca634e1`, block 55252775). The website's
+order-book panel uses `ORDER_BOOK` in `web/src/contracts.ts`; the zero address hides it.
 
 ### Storage and constants
 
