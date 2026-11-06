@@ -75,7 +75,7 @@ Each row is a bullet of "Feature Requirements" in `Project_requirements`. Test n
 | **Resolution and payouts:** arbitrator submits final outcome | Only `arbitrator`, only while `Closed`, only once. Three arbitrator types (section 4.5) | `Market.resolve`, `OptimisticResolver`, `ChainlinkResolver`; `web/src/resolution.tsx`; `bot/` | `test_ArbitratorResolvesClosedMarket`, `test_RevertWhen_ResolvingTwice`, `test_FinalizeResolvesMarketAndReturnsBond`, `test_RuleForDisputerPaysDisputerBothBonds`, `test_E2E1_DirectYes` to `test_E2E8b_...`, `invariant_RES_1_resolvedAtMostOnce` |
 | **Resolution and payouts:** winners redeem | `redeem` burns all the caller's YES and NO and pays 1 per winning share (Resolved) or half per share (Cancelled) | `Market.redeem`, `_settlementValue`; Market and Portfolio pages | `test_WinnerRedeemsOneCollateralPerShare`, `test_RevertWhen_RedeemingTwice`, `test_CancelledRedeemPaysHalfPerShare`, `invariant_RED_2_redeemPaysOnePerWinningShare`, `invariant_RED_4_noDoubleClaims` |
 | Cancel and refund path (team rule: never cut) | No outcome by the deadline: market cancels by itself; shares pay half; bonds are refunded | `Market.state`, `_settlementValue`, `OptimisticResolver.refund` | `test_E2E7_TimeoutCancelsAndRefunds`, `test_E2E8_OptimisticDisputedLeftOpenRefundsBothBonds`, `invariant_RED_3_cancelledRedeemPaysHalf`, `invariant_BND_4_refundMakesEveryoneWhole` |
-| **Bonus 1:** secondary market before resolution | **Built.** `OutcomeOrderBook`: holders list shares at a fixed price, buyers fill cheapest first. Merged, **not deployed yet** | `OutcomeOrderBook.sol`; `web/src/orderbook.tsx` (hidden while `ORDER_BOOK` is the zero address) | 38 tests in `OutcomeOrderBook.t.sol` (e.g. `test_Buy_FillsCheapestFirst`, `test_RevertWhen_ReenteringBuyFromReceiver`, `test_EndToEnd_AmmBookResolveRedeem`); `invariant_OB_1_escrowEqualsOpenListings` to `invariant_OB_4_...` |
+| **Bonus 1:** secondary market before resolution | **Built.** `OutcomeOrderBook`: holders list shares at a fixed price, buyers fill cheapest first. Merged and **deployed on Base Sepolia** (`0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05`) | `OutcomeOrderBook.sol`; `web/src/orderbook.tsx` (hidden while `ORDER_BOOK` is the zero address) | 38 tests in `OutcomeOrderBook.t.sol` (e.g. `test_Buy_FillsCheapestFirst`, `test_RevertWhen_ReenteringBuyFromReceiver`, `test_EndToEnd_AmmBookResolveRedeem`); `invariant_OB_1_escrowEqualsOpenListings` to `invariant_OB_4_...` |
 | **Bonus 2:** multi-asset collateral | **Not built** (user decision 2026-11-04, `work_plan.md` P2-4 `skipped`). One 6-decimal collateral per factory | `MarketFactory` constructor (`InvalidCollateralDecimals`) | `test_RevertWhen_CollateralDecimalsNotSix` |
 | **Bonus 3:** reputation-weighted voting | **Not built** (`work_plan.md` P2-3 `skipped`). Disputes go to one judge | – | – |
 
@@ -272,7 +272,7 @@ From `contracts/broadcast/*/84532/run-latest.json`:
 | `ChainlinkResolver` | `0xAD3F05e6eFFeCD81278894266f5816691E704638` | `0x618c577a99b4ddb1dcaa58412a37f6b77a78aad6d3851fe3efbdd9437f059c5c` | 50040516 |
 | `OptimisticResolver` (bond 10e6, window 7200 s) | `0xe37DB6692De70F5fe69fcABb64b7C737fA096335` | `0xbc82d25b7795e1887b915a6a08f8b43c59fc0613ea7a1dd79a479b3225249bbd` | 50040832 |
 | `MockUSDC` (collateral) | `0x5f29331BBBA6f605942f5de0B217359F3C7B7c51` | not in these broadcast files | – |
-| `OutcomeOrderBook` | not deployed yet | TODO: evidence (live demo, P4-2) | – |
+| `OutcomeOrderBook` | `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05` | `0x66f0f8f79de12a3c12b14bf37d8e11e9d61aa839bee686db7b488ef54ca634e1` | 55252775 |
 
 Since the commit that added these broadcast files (`63c482d`), the only change in `contracts/src` is the
 new order book (`git diff --stat 63c482d 7d7b76f -- contracts/src`). BaseScan source verification:
@@ -312,7 +312,7 @@ The main ones. The full list with decisions is [threat-model.md §5](threat-mode
 | No L2 sequencer check (K-3) | Price could be stale if Base stops | No uptime feed on Base Sepolia; staleness check covers it in practice |
 | No indexer; browser log scan (K-11) | Slow first load as history grows | Fewer moving parts for a testnet demo |
 | Order book: listings only, `Open` only, insert gas grows | Less liquidity than a full exchange | Team decisions Q1, Q2; fine for the demo |
-| Order book not deployed | Bonus 1 cannot be shown live yet | Pending P4-1 |
+| Order book deployed, no live demo yet | Bonus 1 has no public transaction evidence of trades yet | Pending P4-2 (demo) |
 | Spec not on IPFS | Spec text lives in a log, only its hash in storage | P3-1 undecided |
 | Website has no tests or CI job | UI regressions are found by hand | Time |
 | Creator keeps fees in a cancelled market (K-7) | Traders are made whole only to 50/50 | To be confirmed by the team |
