@@ -79,7 +79,7 @@ Bob pays 12 USDC and receives 25 YES. After resolution he redeems through `Marke
   that blocks the book behind it until they cancel. Use `maxListings` and `maxPrice`, or pick
   another price, to work around it.
 - Public transactions can be front-run. `maxPrice` caps what a buyer can pay.
-- No trading after `closeTime`, even before resolution (team decision Q2 B). Prices near close may be stale.
+- No trading after `closeTime`, even before resolution (decided 2026-11-04, so the order book and the AMM stop at the same time). Prices near close may be stale.
 - Sell listings only; there are no bids.
 
 ## Frontend notes

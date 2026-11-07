@@ -98,10 +98,9 @@ The frontend also provides `npm run build` for type-checking and a production bu
 - [Contract spec](docs/contract-spec.md) — every contract's functions, events, errors, and access rules.
 - [Invariants](docs/invariants.md) — the rules the contracts must keep, and the tests that check them.
 - [Threat model](docs/threat-model.md) — trust assumptions, threats, mitigations, and known limitations.
-- [Security analysis](docs/security-analysis.md) — Slither results and coverage.
-- [Testing](docs/testing.md) — how to run every test suite and what each covers.
+- [Testing](docs/testing.md) — how to run every test suite, what each covers, and the [Slither and coverage results](docs/testing.md#security-analysis).
 - [Live demo checklist](docs/demo-checklist.md) — step-by-step Base Sepolia demo.
-- [Final report](docs/final-report.md) and [cross-explanation notes](docs/cross-explanation.md).
+- [Final report](docs/final-report.md) — problem, design justifications, requirement-to-code map, and limitations.
 - [AI Audit Report](docs/ai-audit-report.md) and the [AI audit log](docs/ai/README.md).
 
 The resolver guides describe their respective feed, sequencer, bond-transfer, and operational limitations. Choose an arbitrator and collateral token whose assumptions match the market and deployment environment.

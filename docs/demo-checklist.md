@@ -1,8 +1,8 @@
 # Live demo checklist (Base Sepolia)
 
 A script for one end-to-end run of Sooth on Base Sepolia (chain 84532), recording every transaction hash
-for the AI Audit Report and the final report (task P4-2). Fill the **Tx hash** column as you go; each
-hash opens at `https://sepolia.basescan.org/tx/<hash>`.
+for the AI Audit Report and the final report. Fill the **Tx hash** column as you go; each hash opens at
+`https://sepolia.basescan.org/tx/<hash>`.
 
 Addresses are those in `web/src/contracts.ts`. Never paste private keys here; use Foundry keystore names.
 
@@ -11,7 +11,7 @@ Addresses are those in `web/src/contracts.ts`. Never paste private keys here; us
 | # | Step | Done |
 |---|---|---|
 | 0.1 | Three wallets with Base Sepolia ETH: **Admin** (factory admin, judge, Chainlink resolver owner), **Alice**, **Bob** | ☐ |
-| 0.2 | Order book deployed (`contracts/script/DeployOrderBook.s.sol`, `FACTORY=0x8d399B14ea106bA62F79186217DB6fF1F75dc492`) and its address set as `ORDER_BOOK` in `web/src/contracts.ts` (done: `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05`, tx `0x66f0f8f7…`) | ☑ |
+| 0.2 | Order book deployed (`contracts/script/DeployOrderBook.s.sol`, `FACTORY=0x8d399B14ea106bA62F79186217DB6fF1F75dc492`) and its address set as `ORDER_BOOK` in `web/src/contracts.ts` (done: `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05`, tx `0x66f0f8f79de12a3c12b14bf37d8e11e9d61aa839bee686db7b488ef54ca634e1`, block 55252775) | ☑ |
 | 0.3 | Mint test collateral to each wallet (MockUSDC `0x5f29331BBBA6f605942f5de0B217359F3C7B7c51`, 6 decimals). 100 mUSDC = `100000000`: `cast send 0x5f29331BBBA6f605942f5de0B217359F3C7B7c51 'mint(address,uint256)' <wallet> 100000000 --rpc-url <rpc> --account <keystore>` | ☐ |
 | 0.4 | Screen recording on; website open at `/` with the wallet on Base Sepolia | ☐ |
 
@@ -73,6 +73,6 @@ so trading and closing fit in one sitting; the optimistic flow then needs a 2-ho
 
 ## 7. After the demo
 
-- Paste the hashes into `docs/final-report.md` and `docs/ai-audit-report.md` where they say
-  `TODO: evidence (live demo, P4-2)`.
+- Paste the hashes into `docs/final-report.md` and `docs/ai-audit-report.md` where they mark the live
+  demo as `TODO: evidence`.
 - Save screenshots under `docs/ai/img/` or `docs/img/`.
