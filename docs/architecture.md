@@ -368,8 +368,10 @@ and the bot's `.env`. Nothing reads the broadcast files automatically.
 ### Website hosting
 
 `wrangler.jsonc` at the repo root configures a Cloudflare Worker named `sooth` that serves `web/dist` as a
-single-page app (`not_found_handling: single-page-application`). Build with `npm run build` in `web/`. No
-CI job deploys the site; how deploys are triggered is not recorded in the repo. TODO: evidence.
+single-page app (`not_found_handling: single-page-application`). Build with `npm run build` in `web/`.
+Cloudflare Workers Builds is connected to the GitHub repo: it builds and deploys `main` to
+https://sooth.deva16z.workers.dev, and builds every other branch as a preview, posting the preview URL on
+its pull request (the "Workers Builds: sooth" check). GitHub Actions CI does not deploy.
 
 ### CI (`.github/workflows/ci.yml`)
 

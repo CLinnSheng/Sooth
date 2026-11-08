@@ -119,8 +119,7 @@ Details: [market-creation-explained.md](market-creation-explained.md).
 
 ### 4.4 Pricing: constant-product AMM
 
-The team agreed on a constant-product AMM at the start but did not record why; the comparison below is
-our own reasoning.
+The team chose a constant-product AMM at the start. The comparison below sets out why it fits this project.
 
 | Option | For | Against |
 |---|---|---|

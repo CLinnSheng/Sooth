@@ -1,6 +1,6 @@
 # Testing
 
-How to run every test, what each test file covers, how we test, and what is still missing. Results are from commit `3159dec` on 2026-11-04, run on Windows 11 (Git Bash), unless a row gives another date. Slither and coverage are in [Security analysis](#security-analysis). The properties the tests check are in [`invariants.md`](invariants.md).
+How to run every test, what each test file covers, how we test, and what is still missing. Results were measured on 2026-11-08 on the current code, run on Windows 11 (Git Bash), unless a row gives another date. Slither and coverage are in [Security analysis](#security-analysis). The properties the tests check are in [`invariants.md`](invariants.md).
 
 ## 1. How to run
 
@@ -129,18 +129,18 @@ Counts are from `forge test --summary` and `uv run pytest --collect-only -q`.
 - **Final mutation battery (2026-11-06).** A script planted 24 bugs one at a time in the exact code to be merged (`main` + PR 2 + PR 3, on a clean LF copy), checked each edit applied, ran the full suite, and restored the file byte for byte. **24/24 were caught.** Bugs covered: refund to the wrong person, judge pays the wrong side, finalize during the challenge window, resolver or order book accepting fake markets, anyone resolving, resolving outside `Closed`, missing reentrancy guards on `sell`, `redeem`, `list`, `buy` and `cancel`, double liquidity withdrawal, cancelled payout rounding up, no fee, a resolved market later reading as cancelled, AMM or order-book trading after close, touching one listing too many, cost rounding down, equal prices not oldest-first, escrow not reduced, filled listings left in the book, and anyone cancelling a listing. The fewest catches were 1 test (e.g. the guard on `sell`); the most were 17 (no fee).
 - **Static analysis.** Slither on all of `src/`, every result triaged ([Security analysis](#security-analysis)).
 
-## 4. Results (2026-11-04, commit `3159dec`)
+## 4. Results (2026-11-08)
 
 | Check | Result |
 |---|---|
-| `forge test` | `Ran 9 test suites in 26.85s (43.14s CPU time): 195 tests passed, 0 failed, 0 skipped (195 total tests)` |
+| `forge test` | `Ran 9 test suites in 25.46s (46.14s CPU time): 195 tests passed, 0 failed, 0 skipped (195 total tests)` |
 | Invariant suite, default profile (inside `forge test`) | `SoothInvariantsTest invariants (runs: 64, calls: 4096, reverts: 0)`, passed |
-| Invariant suite, `FOUNDRY_PROFILE=deep` | `SoothInvariantsTest invariants (runs: 512, calls: 65536, reverts: 0)`; `1 tests passed, 0 failed`; 461.05 s (7 min 43 s wall). Run in parallel with other forge and pytest commands, so the time is an upper bound |
-| `forge coverage --report summary` | 195 passed in 49.8 s wall. Lines and functions 100% for every production file in `src/`; branches 100% except `Market.sol` 93.75% (30/32). [Full table](#coverage) |
-| Slither 0.11.6 | 23 results, 0 real issues (14 justified, 9 false positives). [Details](#security-analysis) |
+| Invariant suite, `FOUNDRY_PROFILE=deep` (2026-11-04) | `SoothInvariantsTest invariants (runs: 512, calls: 65536, reverts: 0)`; `1 tests passed, 0 failed`; 461.05 s (7 min 43 s wall). Run in parallel with other forge and pytest commands, so the time is an upper bound |
+| `forge coverage --report summary` | 195 passed. Lines and functions 100% for every production file in `src/`; branches 100% except `Market.sol` 93.75% (30/32). [Full table](#coverage) |
+| Slither 0.11.6 (2026-11-04) | 23 results, 0 real issues (14 justified, 9 false positives). [Details](#security-analysis) |
 | `forge build --sizes --skip './test/**' --skip './script/**'` | Exit 0; the largest `src/` contract is `Market` at 13,677 B. Without `--skip`: exit 1 on the test handler (section 1) |
 | `forge fmt --check` | All 34 tracked `.sol` files formatted (checked on the committed LF content; a CRLF checkout fails, see section 1) |
-| `uv run pytest -q -rs` (bot) | `173 passed, 15 skipped in 23.59s` |
+| `uv run pytest -q -rs` (bot, 2026-11-04) | `173 passed, 15 skipped in 23.59s` |
 
 ## 5. Known gaps
 
@@ -169,7 +169,7 @@ From this run:
 
 ## Security analysis
 
-Slither and coverage on commit `3159dec` (2026-11-04).
+Coverage re-run on 2026-11-08 on the current code. Slither was run on 2026-11-04 (commit `3159dec`); `contracts/src` has not changed since except one comment in `IMarketFactory.sol`.
 
 ### Slither: setup
 
@@ -283,8 +283,8 @@ Command: `forge coverage --report summary`, with `--report lcov` in the same cal
 | test/OutcomeOrderBook.t.sol | 100.00% (30/30) | 100.00% (29/29) | 100.00% (5/5) | 100.00% (7/7) |
 | test/invariant/HandlerBase.sol | 92.86% (26/28) | 96.30% (26/27) | 100.00% (3/3) | 90.00% (9/10) |
 | test/invariant/MarketHandler.sol | 94.21% (293/311) | 91.22% (426/467) | 63.53% (54/85) | 96.67% (29/30) |
-| test/invariant/ResolverHandler.sol | 97.56% (120/123) | 90.96% (171/188) | 56.10% (23/41) | 100.00% (13/13) |
-| **Total** | **88.26% (970/1099)** | **86.66% (1254/1447)** | **71.84% (199/277)** | **90.17% (156/173)** |
+| test/invariant/ResolverHandler.sol | 97.44% (114/117) | 91.76% (167/182) | 60.98% (25/41) | 100.00% (13/13) |
+| **Total** | **88.20% (964/1093)** | **86.75% (1250/1441)** | **72.56% (201/277)** | **90.17% (156/173)** |
 
 The Total row includes scripts and test helpers, so it does not measure the production code. In the first run (137 tests, before the order book, re-entrancy and invariant tests), `src/Market.sol` had statements 98.39% (183/186) and branches 90.62% (29/32); the other existing `src/` rows are unchanged. Without the invariant suite (`--no-match-path 'test/invariant/*'`, 194 tests) `src/Market.sol` drops back to those numbers, and `src/OutcomeOrderBook.sol` stays at 100% from its unit tests alone.
 
