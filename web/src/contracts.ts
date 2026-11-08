@@ -12,9 +12,9 @@ export const OUTCOME_TOKEN: Address = '0xA2D1e9A1e195d01B1aC21090962B7F2AD76BDB5
 export const OPTIMISTIC_RESOLVER: Address = '0xe37DB6692De70F5fe69fcABb64b7C737fA096335'
 // Price-feed resolver: settles on the Chainlink round live at close; anyone can trigger it.
 export const CHAINLINK_RESOLVER: Address = '0xAD3F05e6eFFeCD81278894266f5816691E704638'
-// Holder-to-holder order book. Zero until DeployOrderBook.s.sol runs and its address is filled in here;
-// while zero the market page hides the order-book panel.
-export const ORDER_BOOK: Address = '0x0000000000000000000000000000000000000000'
+// Holder-to-holder order book, from contracts/broadcast/DeployOrderBook.s.sol/84532/run-latest.json.
+// Setting it to the zero address hides the market page's order-book panel.
+export const ORDER_BOOK: Address = '0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05'
 
 export const factoryAbi = parseAbi([
   'function marketCount() view returns (uint256)',

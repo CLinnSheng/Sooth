@@ -1,8 +1,7 @@
 # Architecture
 
 This is the system overview of Sooth: what runs on chain, what runs off chain, and how the parts talk.
-It was written from `lin/integration` at `3159dec`. Function-level rules are in
-[contract-spec.md](contract-spec.md). Each component has its own doc, linked in each section.
+Function-level rules are in [contract-spec.md](contract-spec.md). Each section links the component doc.
 
 ## 1. System context
 
@@ -55,10 +54,9 @@ flowchart LR
 | Order book | `OutcomeOrderBook` holds listings and escrow | Website reads the book with view calls |
 | Hosting | none | Cloudflare Workers serves the built site. The bot runs wherever someone starts it |
 
-Nothing off chain can move funds or change an outcome on its own. The bot and website only send
-transactions that the contracts check. The trust points are the admin (who creates markets and picks the
-arbitrator), the judge, the Chainlink feed and any custom arbitrator. See
-[threat-model.md](threat-model.md).
+Nothing off chain can move funds or change an outcome on its own: the bot and website only send
+transactions that the contracts check. The trust points are the admin, the judge, the Chainlink feed and
+any custom arbitrator ([threat-model.md](threat-model.md)).
 
 ## 3. Contracts and call graph
 
@@ -69,7 +67,7 @@ arbitrator), the judge, the Chainlink feed and any custom arbitrator. See
 | `OutcomeToken` | One ERC-1155 for all markets. Token id = `keccak256(abi.encode(marketId, outcome))` | [§3](contract-spec.md#3-outcometoken) |
 | `OptimisticResolver` | Arbitrator: bonded proposal, dispute, judge | [§4](contract-spec.md#4-optimisticresolver) |
 | `ChainlinkResolver` | Arbitrator: price at close from a Chainlink feed | [§5](contract-spec.md#5-chainlinkresolver) |
-| `OutcomeOrderBook` | Fixed-price listings of shares. Not deployed yet | [§6](contract-spec.md#6-outcomeorderbook) |
+| `OutcomeOrderBook` | Fixed-price listings of shares (Bonus 1) | [§6](contract-spec.md#6-outcomeorderbook) |
 
 ```mermaid
 flowchart TD
@@ -102,19 +100,17 @@ flowchart TD
     OB -->|"buyer to seller"| C
 ```
 
-Key points:
-
 - Only the factory can initialize a clone and register token ids. Only a market can mint or burn its own ids.
-- A market's `arbitrator` is fixed at creation. It can be `OptimisticResolver`, `ChainlinkResolver` or
-  any address (a "custom" arbitrator). Only that address can call `Market.resolve`.
-- The resolvers and the order book only accept markets that the factory lists
-  (`factory.markets(market.marketId()) == market`). `ChainlinkResolver` instead relies on its owner
-  configuring only real markets.
-- Creation details and the clone pattern: [market-creation-explained.md](market-creation-explained.md).
+- A market's `arbitrator` is fixed at creation; only that address can call `Market.resolve`.
+- `OptimisticResolver` and the order book only accept markets the factory lists
+  (`factory.markets(market.marketId()) == market`). `ChainlinkResolver` relies on its owner configuring
+  only real markets.
+
+Creation and the clone pattern: [market-creation-explained.md](market-creation-explained.md).
 
 ## 4. Market state machine
 
-`Closed` and `Cancelled` are never written. `Market.state()` derives them from the clock while the stored
+`Closed` and `Cancelled` are never written: `Market.state()` derives them from the clock while the stored
 state is `Open`. Only `resolve` writes a new state (`Resolved`). The enum value `Proposed` is never used by
 `Market`.
 
@@ -128,21 +124,14 @@ stateDiagram-v2
     Cancelled --> [*]
 ```
 
-| State | Allowed |
-|---|---|
-| `Open` | Trade on the AMM, quotes, order book `list` and `buy` |
-| `Closed` | `withdrawFees`, `resolve` by the arbitrator, optimistic `propose` / `dispute` / `finalize` / `rule`, Chainlink `resolve` |
-| `Resolved` | `redeem` (1 unit per winning share), `withdrawLiquidity`, `withdrawFees` |
-| `Cancelled` | `redeem` (half a unit per share), `withdrawLiquidity`, `withdrawFees`, optimistic `refund` |
-
-The full action-by-state table is in [contract-spec.md §10](contract-spec.md#10-what-works-in-which-market-state).
-Payout rules: [invariants.md](invariants.md) (§5 Redemption).
+What each state allows: [contract-spec.md §10](contract-spec.md#10-what-works-in-which-market-state).
+Payouts: [market-settlement.md](market-settlement.md).
 
 ## 5. Trading on the AMM
 
-Each market is a constant-product pool of YES and NO shares. A buy mints a matching YES+NO pair per net
-collateral unit and swaps through the pool. The fee is 1%, rounded up, and goes to `accruedFees` for the
-creator. Pricing and rounding: [trading-engine.md](trading-engine.md).
+Each market is a constant-product pool of YES and NO shares. A buy mints a YES+NO pair per net collateral
+unit and swaps through the pool; the 1% fee goes to `accruedFees`. Pricing and rounding:
+[trading-engine.md](trading-engine.md).
 
 ```mermaid
 sequenceDiagram
@@ -162,24 +151,20 @@ sequenceDiagram
     M-->>Trader: emit Bought
 ```
 
-A sell is the reverse: the market takes the shares (the trader first sets `setApprovalForAll`), burns
-matching YES+NO pairs and pays out collateral minus the fee.
-
-The website quotes trades in the browser (`quoteBuy` / `quoteSell` in `web/src/mock.ts`) from the pools it
-last read, not by calling `Market.quoteBuy`. The `minSharesOut` / `minCollateralOut` argument protects the
-trader if the pools moved in between.
+A sell is the reverse (after `setApprovalForAll`). The website quotes in the browser (`web/src/mock.ts`)
+from the pools it last read, not by calling `Market.quoteBuy`; `minSharesOut` / `minCollateralOut`
+protects the trader if the pools moved.
 
 ## 6. Resolution flows
 
-A market is resolved by whichever address it named as `arbitrator`. If nobody resolves it within 7 days of
-close, it cancels by itself and every share pays half a unit.
+A market is resolved by its `arbitrator`. If nobody resolves it within 7 days of close, it cancels by
+itself and every share pays half a unit.
 
 ### 6.1 Chainlink (price markets)
 
-The admin configures the feed, threshold and comparison before close (`CreateMarket.s.sol` or the Admin
-page does it right after creation). After close, anyone can resolve with the round that was live at
-`closeTime`. The contract checks the round, so the caller cannot pick the price. Details:
-[chainlink-resolver.md](chainlink-resolver.md).
+The admin configures the feed before close (`CreateMarket.s.sol`, or the Admin page right after
+creation). After close, anyone resolves with the round that was live at `closeTime`; the contract checks
+the round, so the caller cannot pick the price. Details: [chainlink-resolver.md](chainlink-resolver.md).
 
 ```mermaid
 sequenceDiagram
@@ -230,26 +215,20 @@ sequenceDiagram
     end
 ```
 
-`finalize` can be called by anyone, not only the proposer. `propose` is rejected if the challenge window
-would end at or after the market's deadline, so an undisputed proposal can always be finalized in time.
-Deployed parameters: bond 10 mUSDC, challenge window 2 hours. Details:
-[optimistic-resolver.md](optimistic-resolver.md).
+Anyone can call `finalize` and `refund`, not only the proposer. Deployed parameters: bond 10 mUSDC,
+challenge window 2 hours. Details: [optimistic-resolver.md](optimistic-resolver.md).
 
 ### 6.3 Custom arbitrator
 
-The admin can name any address as arbitrator. That address calls `Market.resolve(outcome)` directly while
-the market is `Closed`. The contracts trust it fully. The website offers this as the "custom" option on the
-Admin page.
+The admin can name any address as arbitrator ("custom" on the Admin page). That address calls
+`Market.resolve(outcome)` directly while the market is `Closed`, and is fully trusted.
 
 ## 7. Order book flow
 
-`OutcomeOrderBook` lets holders sell shares at a fixed price instead of through the AMM. One contract serves
-every market of the factory. Listings are kept per (market, outcome), cheapest first, oldest first at the
-same price. It works only while the market is `Open`; `cancel` works in every state. Details:
-[order-book.md](order-book.md).
-
-It is **not deployed yet** (`DeployOrderBook.s.sol`). The website hides its panel while `ORDER_BOOK` in
-`web/src/contracts.ts` is the zero address.
+One `OutcomeOrderBook` serves every market of the factory. Listings are kept per (market, outcome),
+cheapest first, oldest first at the same price. `list` and `buy` work only while the market is `Open`;
+`cancel` works in every state. The website panel shows while `ORDER_BOOK` in `web/src/contracts.ts` is set
+(the zero address hides it). Details: [order-book.md](order-book.md).
 
 ```mermaid
 sequenceDiagram
@@ -277,14 +256,11 @@ sequenceDiagram
 
 ## 8. Settlement and payouts
 
-After `Resolved` or `Cancelled`:
-
-- `redeem()` burns all the caller's YES and NO of that market and pays them.
-- `withdrawLiquidity()` pays the creator the value of the pool's own shares, once.
-- `withdrawFees()` pays the creator the accrued fees (allowed from `Closed` on).
-
-Anyone may trigger the two withdrawals; the money always goes to `creator`. The website's Collect page
-sweeps all markets in one Multicall3 `aggregate3` transaction with `allowFailure` on each call.
+After `Resolved` or `Cancelled`, `redeem()` burns the caller's YES and NO and pays them;
+`withdrawLiquidity()` pays the creator the value of the pool's own shares, once; `withdrawFees()` pays the
+accrued fees (from `Closed` on). Anyone may trigger the withdrawals; the money always goes to `creator`.
+The website's Collect page sweeps all markets in one Multicall3 `aggregate3` transaction with
+`allowFailure` on each call.
 
 ## 9. Website (`web/`)
 
@@ -302,25 +278,20 @@ React + TypeScript + Vite, with wagmi, viem and RainbowKit. Config: `web/src/wag
 How it reads the chain (`web/src/chain.ts`):
 
 1. Pins every read to one block number, so state and logs match.
-2. Reads `marketCount` and each `markets(id)` from the factory.
-3. Reads each market's pools, `closeTime`, `state`, `winningOutcome` and `liquidityWithdrawn`.
-4. Scans logs with `getLogs` from `DEPLOY_BLOCK` (`50_040_022`) for the factory, both resolvers and every
-   market: `MarketCreated`, `Bought`, `Sold`, `FeesWithdrawn`, `LiquidityWithdrawn`, `Redeemed`,
-   `Proposed`, `Disputed`, `Finalized`, `Ruled`, `Refunded`, `PriceResolved`, and, once `ORDER_BOOK` is set,
-   the order book's `Listed`, `Filled` and `Cancelled`. Ranges are up to 10,000,000
-   blocks per call (`MAX_LOG_RANGE`). Later refreshes scan only new blocks.
-5. Refetches every 30 seconds. Positions come from `OutcomeToken.balanceOfBatch`.
+2. Reads `marketCount`, each `markets(id)`, and each market's pools, `closeTime`, `state`,
+   `winningOutcome` and `liquidityWithdrawn`.
+3. Scans logs with `getLogs` from `DEPLOY_BLOCK` (`50_040_022`) for the factory, both resolvers, every
+   market and (once `ORDER_BOOK` is set) the order book, up to 10,000,000 blocks per call
+   (`MAX_LOG_RANGE`). Later refreshes scan only new blocks.
+4. Refetches every 30 seconds. Positions come from `OutcomeToken.balanceOfBatch`.
 
 The RPC is a public Tenderly gateway for Base Sepolia (it allows large `getLogs` ranges), with viem's
-default RPC as fallback. There is no indexer and no backend: all history is rebuilt in the browser. The
-code marks this as a shortcut (an indexer such as Ponder is the planned fix). The live order book (best
-price, listings, quotes) is read with view calls (`bestPrice`, `listingsOf`, `getListing`, `quoteBuy`).
-Order-book history comes from its logs: each `Filled` becomes a Buy row for the buyer and a Sell row for
-the seller (tagged "book"), `Listed` and `Cancelled` become List and Cancel rows in the seller's portfolio
-history, and open listings count in the seller's position as "listed". The AMM price chart and volume use
-pool trades only. Details: [order-book.md](order-book.md#website).
+default RPC as fallback. There is no indexer and no backend; the code marks this as a shortcut (an indexer
+such as Ponder is the planned fix). The live order book is read with view calls (`bestPrice`,
+`listingsOf`, `getListing`, `quoteBuy`); its `Filled`, `Listed` and `Cancelled` logs feed trade history
+and positions ([order-book.md](order-book.md#website)). The AMM price chart and volume use pool trades only.
 
-Wallets: browser extension wallets (with EIP-6963 discovery on). With `VITE_WALLETCONNECT_PROJECT_ID` set, the
+Wallets: browser extension wallets (EIP-6963 discovery on). With `VITE_WALLETCONNECT_PROJECT_ID` set, the
 list is MetaMask, Trust, Rabby, Phantom and WalletConnect.
 
 ## 10. Bot (`bot/`)
@@ -373,7 +344,7 @@ proposal.
 | `OptimisticResolver` | `0xe37DB6692De70F5fe69fcABb64b7C737fA096335` | `broadcast/DeployOptimisticResolver.s.sol/84532/run-latest.json`, block 50040832 |
 | `ChainlinkResolver` | `0xAD3F05e6eFFeCD81278894266f5816691E704638` | `broadcast/DeployChainlinkResolver.s.sol/84532/run-latest.json`, block 50040516 |
 | `MockUSDC` (collateral) | `0x5f29331BBBA6f605942f5de0B217359F3C7B7c51` | `COLLATERAL` argument of the factory deploy; `web/src/contracts.ts` |
-| `OutcomeOrderBook` | not deployed yet (`DeployOrderBook.s.sol`) | |
+| `OutcomeOrderBook` | `0x539a5842371cEeA853A5Adab48bAFc2a5d9B2b05` | `broadcast/DeployOrderBook.s.sol/84532/run-latest.json`, block 55252775 |
 
 Market clones are created by `createMarket`; their addresses come from `factory.markets(id)`.
 
@@ -384,22 +355,23 @@ flowchart LR
     usdc["MockUSDC<br/>(test chains only)"] --> fac["DeployMarketFactory<br/>also deploys OutcomeToken<br/>and Market implementation"]
     fac --> opt["DeployOptimisticResolver<br/>FACTORY"]
     fac --> cl["DeployChainlinkResolver"]
-    fac --> ob["DeployOrderBook<br/>FACTORY (not run yet)"]
+    fac --> ob["DeployOrderBook<br/>FACTORY"]
     opt --> web["Update web/src/contracts.ts<br/>and bot .env"]
     cl --> web
     ob --> web
     web --> mk["CreateMarket or Admin page"]
 ```
 
-After a new deploy, the addresses must be copied by hand into `web/src/contracts.ts` (including
-`DEPLOY_BLOCK`) and into the bot's `.env`. Nothing reads the broadcast files automatically.
+After a new deploy, copy the addresses by hand into `web/src/contracts.ts` (including `DEPLOY_BLOCK`)
+and the bot's `.env`. Nothing reads the broadcast files automatically.
 
 ### Website hosting
 
-`wrangler.jsonc` at the repo root configures a Cloudflare Worker named `sooth` that serves the static
-build in `web/dist` as a single-page app (`not_found_handling: single-page-application`). Build with
-`npm run build` in `web/`. No CI job deploys the site; how deploys are triggered (Cloudflare's Git
-integration or a manual `wrangler deploy`) is not recorded in the repo. TODO: evidence.
+`wrangler.jsonc` at the repo root configures a Cloudflare Worker named `sooth` that serves `web/dist` as a
+single-page app (`not_found_handling: single-page-application`). Build with `npm run build` in `web/`.
+Cloudflare Workers Builds is connected to the GitHub repo: it builds and deploys `main` to
+https://sooth.deva16z.workers.dev, and builds every other branch as a preview, posting the preview URL on
+its pull request (the "Workers Builds: sooth" check). GitHub Actions CI does not deploy.
 
 ### CI (`.github/workflows/ci.yml`)
 
@@ -410,18 +382,4 @@ Runs on pushes and pull requests to `main`, and by hand.
 | Contracts | `forge fmt --check`, `forge build --sizes`, `forge test -vvv` (Foundry pinned to v1.8.5) |
 | Bot | `uv sync --locked`, install Chromium, `uv run pytest`. Fails if the browser tests were skipped |
 
-The website has no CI job (no lint or build check in CI).
-
-## 12. Related docs
-
-| Doc | Covers |
-|---|---|
-| [contract-spec.md](contract-spec.md) | Every function, event, error and constant |
-| [market-creation-explained.md](market-creation-explained.md) | Factory, clones, outcome tokens |
-| [trading-engine.md](trading-engine.md) | AMM maths and fees |
-| [chainlink-resolver.md](chainlink-resolver.md) | Price-feed settlement |
-| [optimistic-resolver.md](optimistic-resolver.md) | Bonds, disputes, judge |
-| [order-book.md](order-book.md) | Listings and fills |
-| [invariants.md](invariants.md) | Properties and their tests |
-| [threat-model.md](threat-model.md) | Actors, trust, threats |
-| [security-analysis.md](security-analysis.md) | Slither and coverage |
+The website has no CI job.

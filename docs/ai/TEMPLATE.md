@@ -1,6 +1,6 @@
 ## N. Short issue title
 
-Copy this block to the end of your own file, `docs/ai/<name>.md`, use the next free number `N` in that file, and fill every field.
+Copy this block to the end of your own file, `docs/ai/<name>.md`, with the next free number `N`, and fill every field.
 Write only what really happened. If evidence is missing, write `TODO: evidence`.
 
 | Field | Value |
@@ -30,7 +30,7 @@ Code change, manual adjustment, or prompt/spec update. Link the commit or PR.
 
 ### Evidence the fix works
 
-Real output only. Paste or link each item that applies.
+Real output only. Paste or link each item that applies:
 
 - Test log: test name and result
 - Slither output: detector and result
